@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>หาหน้าฉัน</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📸</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+/* ===================== ตั้งค่า =====================
+   ใส่ Google API key ของคุณระหว่างเครื่องหมาย '' ด้านล่าง
+   ถ้าเว้นว่างไว้ เว็บยังใช้ได้ แต่จะไม่มีโหมดวางลิงก์ Drive
+   ================================================== */
+const DRIVE_API_KEY = '';
+</script>
+<style>
+:root{
+  --paper:#F1F4F0;--card:#FFFFFF;--ink:#17201C;--muted:#56645D;--line:#D3DAD4;
+  --forest:#21503B;--forest-ink:#FFFFFF;--marker:#F2D500;--warn:#9A3B12;--soft:#E6ECE7;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#111613;--card:#19201C;--ink:#E7ECE8;--muted:#9AA79F;--line:#2B3530;
+  --forest:#86C9A7;--forest-ink:#0F1A14;--warn:#F0A07A;--soft:#202924;}}
+:root[data-theme="dark"]{--paper:#111613;--card:#19201C;--ink:#E7ECE8;--muted:#9AA79F;--line:#2B3530;--forest:#86C9A7;--forest-ink:#0F1A14;--warn:#F0A07A;--soft:#202924;}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Anuphan",system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;font-size:17px;line-height:1.65}
+main{max-width:1000px;margin:0 auto;padding:40px 20px 80px}
+h1{font-size:clamp(44px,9vw,76px);line-height:1.05;font-weight:700;margin:0 0 10px;letter-spacing:-.01em}
+.lede{font-size:19px;color:var(--muted);max-width:34em;margin:0 0 6px}
+.private{font-size:15px;color:var(--muted);margin:0 0 36px;display:flex;gap:8px;align-items:flex-start}
+.private svg{flex:none;margin-top:4px}
+.steps{display:grid;grid-template-columns:1fr 1.4fr;gap:16px}
+@media (max-width:760px){.steps{grid-template-columns:1fr}}
+.step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+.step h2{font-size:19px;font-weight:600;margin:0 0 2px;display:flex;gap:10px;align-items:baseline}
+.step h2 .n{font-size:15px;color:var(--forest);font-weight:700}
+.hint{margin:0 0 14px;color:var(--muted);font-size:15px}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:18px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--forest);background:var(--soft)}
+.drop strong{display:block;font-weight:600}
+.drop span{font-size:14px;color:var(--muted)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button{font:inherit;cursor:pointer;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);padding:8px 16px;font-size:15px}
+button:hover{border-color:var(--ink)}
+button:focus-visible,.drop:focus-visible,input:focus-visible{outline:2px solid var(--forest);outline-offset:2px}
+button.primary{background:var(--forest);color:var(--forest-ink);border-color:var(--forest);font-weight:600;padding:12px 26px;font-size:17px}
+button:disabled{opacity:.4;cursor:not-allowed}
+.tabs{display:flex;gap:4px;background:var(--soft);border-radius:999px;padding:4px;margin:0 0 14px;width:max-content;max-width:100%}
+.tabs button{border:0;padding:6px 14px;font-size:15px}
+.tabs button[aria-selected="true"]{background:var(--card);font-weight:600}
+.linkrow{display:flex;gap:8px;flex-wrap:wrap}
+.linkrow input{flex:1;min-width:200px;font:inherit;font-size:15px;padding:9px 14px;border:1px solid var(--line);border-radius:999px;background:var(--paper);color:var(--ink)}
+.selfies{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.selfie{position:relative;width:76px;height:76px;border-radius:50%;overflow:hidden;border:2px solid var(--line)}
+.selfie img{width:100%;height:100%;object-fit:cover}
+.selfie.ok{border-color:var(--forest)}
+.selfie.bad{border-color:var(--warn)}
+.selfie button{position:absolute;inset:auto 0 0 0;border:0;border-radius:0;padding:2px;font-size:12px;background:rgba(0,0,0,.55);color:#fff}
+.msg{font-size:14px;margin-top:8px;color:var(--muted)}
+.msg.err{color:var(--warn)}
+.pool{margin-top:12px;font-size:15px}
+.go{display:flex;align-items:center;gap:16px;margin:24px 0 8px;flex-wrap:wrap}
+.status{color:var(--muted);font-size:15px}
+.status.err{color:var(--warn)}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:6px 0 0;width:min(520px,80vw)}
+.bar i{display:block;height:100%;width:0;background:var(--forest);transition:width .2s}
+#results{margin-top:36px;display:none}
+.rhead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:16px}
+.count{font-size:34px;font-weight:700;line-height:1.1}
+.count small{font-size:17px;font-weight:400;color:var(--muted);display:block}
+.tune{display:flex;flex-direction:column;gap:2px;min-width:250px}
+.tune label{font-size:14px;color:var(--muted)}
+.tune .ends{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+.learn{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);margin-top:6px;cursor:pointer}
+input[type=range],input[type=checkbox]{accent-color:var(--forest)}
+input[type=range]{width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.ph{position:relative;margin:0;border-radius:8px;overflow:hidden;background:var(--line)}
+.ph .imgwrap{position:relative;cursor:zoom-in}
+.ph img{display:block;width:100%;height:auto}
+.ph .ring{position:absolute;pointer-events:none;overflow:visible}
+.ph .ring ellipse{fill:none;stroke:var(--marker);stroke-width:4;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.ph .ring.maybe ellipse{stroke-dasharray:6 7}
+.ph .pick{position:absolute;top:8px;left:8px;width:24px;height:24px;border-radius:6px;border:2px solid #fff;background:rgba(0,0,0,.35);display:grid;place-items:center;cursor:pointer;padding:0}
+.ph.sel .pick{background:var(--forest);border-color:var(--forest)}
+.ph .pick svg{opacity:0}.ph.sel .pick svg{opacity:1}
+.found .ph:not(.sel) img{opacity:.5}
+.ph .fb{display:flex;background:var(--card);border-top:1px solid var(--line)}
+.ph .fb button{flex:1;border:0;border-radius:0;padding:6px 4px;font-size:14px}
+.ph .fb button+button{border-left:1px solid var(--line)}
+.ph .fb button:hover{background:var(--soft)}
+.ph .fb .done{flex:1;text-align:center;font-size:14px;padding:6px 4px;color:var(--forest);font-weight:600}
+.sec{margin:32px 0 10px;font-size:20px;font-weight:600}
+.sec small{display:block;font-size:15px;font-weight:400;color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:20px 0 0}
+.empty{color:var(--muted);padding:20px 0}
+dialog{border:0;padding:0;background:transparent;max-width:96vw;max-height:92vh}
+dialog::backdrop{background:rgba(10,14,12,.85)}
+dialog img{max-width:96vw;max-height:86vh;display:block;border-radius:6px}
+dialog .cap{color:#e8ece9;font-size:14px;margin-top:6px;display:flex;justify-content:space-between;gap:12px;align-items:center}
+dialog .cap button{color:#e8ece9;border-color:#555}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <h1>หาหน้าฉัน</h1>
+  <p class="lede">ใส่เซลฟี่ของคุณ แล้วส่งรูปค่ายหรือรูปงานมาทั้งโฟลเดอร์ ระบบจะคัดเฉพาะรูปที่มีหน้าคุณออกมาให้</p>
+  <p class="private"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>ใบหน้าและรูปทั้งหมดประมวลผลในเครื่องของคุณ ไม่มีการส่งขึ้นเซิร์ฟเวอร์ของใคร</p>
+
+  <div class="steps">
+    <section class="step" aria-labelledby="s1">
+      <h2 id="s1"><span class="n">1</span>เซลฟี่ของคุณ</h2>
+      <p class="hint">1–3 รูป หน้าเห็นชัด ถ้าได้หลายมุมจะแม่นขึ้น</p>
+      <div class="drop" id="selfieDrop" tabindex="0" role="button" aria-label="เลือกรูปเซลฟี่">
+        <strong>เลือกรูปเซลฟี่</strong><span>หรือลากมาวางตรงนี้</span>
+      </div>
+      <input type="file" id="selfieInput" accept="image/*" multiple hidden>
+      <div class="selfies" id="selfieList"></div>
+      <div class="msg" id="selfieMsg"></div>
+    </section>
+
+    <section class="step" aria-labelledby="s2">
+      <h2 id="s2"><span class="n">2</span>รูปที่จะค้นหา</h2>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabDrive" aria-selected="true">วางลิงก์ Google Drive</button>
+        <button role="tab" id="tabLocal" aria-selected="false">ไฟล์ในเครื่อง</button>
+      </div>
+      <div id="paneDrive">
+        <p class="hint">โฟลเดอร์ต้องเปิดแชร์เป็น “ทุกคนที่มีลิงก์”</p>
+        <div class="linkrow">
+          <input id="driveLink" type="url" placeholder="https://drive.google.com/drive/folders/…" aria-label="ลิงก์โฟลเดอร์ Google Drive">
+          <button id="driveBtn">ดึงรายการรูป</button>
+        </div>
+        <div class="msg" id="driveMsg"></div>
+      </div>
+      <div id="paneLocal" hidden>
+        <p class="hint">ลากรูป โฟลเดอร์ หรือไฟล์ .zip ที่โหลดมาจาก Drive มาวางได้เลย</p>
+        <div class="drop" id="poolDrop" tabindex="0" role="button" aria-label="เลือกรูปหรือไฟล์ zip">
+          <strong>ลากรูป โฟลเดอร์ หรือไฟล์ .zip มาวาง</strong><span>รองรับ JPG, PNG, WebP</span>
+        </div>
+        <div class="btnrow">
+          <button type="button" id="pickFiles">เลือกไฟล์ / zip</button>
+          <button type="button" id="pickFolder">เลือกทั้งโฟลเดอร์</button>
+        </div>
+        <input type="file" id="poolInput" accept="image/*,.zip,application/zip" multiple hidden>
+        <input type="file" id="folderInput" webkitdirectory multiple hidden>
+      </div>
+      <div class="pool" id="poolInfo"></div>
+      <div class="btnrow"><button type="button" id="clearPool" hidden>ล้างรายการ</button></div>
+    </section>
+  </div>
+
+  <div class="go">
+    <button class="primary" id="goBtn" disabled>เริ่มหาหน้าฉัน</button>
+    <button id="stopBtn" hidden>หยุด</button>
+    <div>
+      <div class="status" id="status" aria-live="polite">กำลังโหลด AI จดจำใบหน้า…</div>
+      <div class="bar" id="bar"><i></i></div>
+    </div>
+  </div>
+
+  <section id="results">
+    <div class="rhead">
+      <div class="count"><span id="found">0</span> รูป<small id="foundSub">ที่มีคุณ</small></div>
+      <div class="tune">
+        <label for="thr">ความเข้มงวดในการจับคู่</label>
+        <input type="range" id="thr" min="0.25" max="0.60" step="0.01" value="0.38">
+        <div class="ends"><span>หลวม เจอเยอะขึ้น</span><span>เข้ม เจอเฉพาะที่ชัวร์</span></div>
+        <label class="learn"><input type="checkbox" id="learn" checked> ให้ระบบเรียนหน้าคุณจากรูปที่มั่นใจ</label>
+      </div>
+    </div>
+    <div class="grid found" id="grid"></div>
+    <div class="empty" id="empty" hidden>ยังไม่เจอรูปที่มั่นใจว่ามีคุณ ลองเลื่อนแถบไปทาง “หลวม” หรือดูในส่วน “อาจจะใช่” ด้านล่าง</div>
+    <div class="actions" id="actions" hidden>
+      <button class="primary" id="dlBtn">ดาวน์โหลดรูปที่เลือก (.zip)</button>
+      <button id="selAll">เลือกทั้งหมด</button>
+      <button id="selNone">ไม่เลือกเลย</button>
+      <span class="status" id="dlMsg"></span>
+    </div>
+    <div id="maybeWrap" hidden>
+      <h2 class="sec">อาจจะใช่ <span id="maybeN"></span><small>กด “ใช่ฉัน” หรือ “ไม่ใช่” สักสองสามรูป ระบบจะเรียนรู้และจัดรูปที่เหลือให้แม่นขึ้นทันที</small></h2>
+      <div class="grid" id="maybeGrid"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="lb"><img id="lbImg" alt=""><div class="cap"><span id="lbName"></span><button id="lbClose">ปิด</button></div></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+(function(){
+const $ = id => document.getElementById(id);
+const IMG_RE = /\.(jpe?g|png|webp|gif|bmp)$/i, HEIC_RE = /\.(heic|heif)$/i;
+const DET_SIZE = 640;
+const ARC = [[38.2946,51.6963],[73.5318,51.5014],[56.0252,71.7366],[41.5493,92.3655],[70.7299,92.2041]];
+
+let det = null, rec = null, ready = false, running = false, stopFlag = false;
+let selfies = [];        // {file,url,emb,state}
+let pool = [];           // {name, get():Promise<Blob>, file?}
+let skipped = 0;
+let results = [];        // {item, thumb, w, h, faces:[{box,emb,score}], best, bestFace, blob, confirmed, rejected}
+const confirmed = [], negatives = [];
+let auto = [];
+const excluded = new Set();
+
+const setStatus = (t, err) => { $('status').textContent = t; $('status').className = 'status' + (err ? ' err' : ''); };
+const setBar = p => { $('bar').firstElementChild.style.width = (p*100) + '%'; };
+
+/* ---------------- models ---------------- */
+async function fetchModel(url, onp){
+  let res = await fetch(url);
+  if(!res.ok) res = await fetch(url.split('/').pop());
+  if(!res.ok) throw new Error('model ' + url + ' ' + res.status);
+  const total = +res.headers.get('content-length') || 0, reader = res.body.getReader(), chunks = []; let got = 0;
+  for(;;){ const {done, value} = await reader.read(); if(done) break; chunks.push(value); got += value.length; onp(got, total); }
+  const out = new Uint8Array(got); let o = 0; for(const c of chunks){ out.set(c, o); o += c.length; } return out;
+}
+async function initAI(){
+  if(location.protocol === 'file:'){ setStatus('เปิดไฟล์นี้ตรงๆ จากเครื่องไม่ได้ ต้องเปิดผ่านเว็บ เช่น GitHub Pages', true); return; }
+  try{
+    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
+    ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+    const sizes = {d:2.5, r:13.6}; let pd = 0, pr = 0;
+    const show = () => { setStatus(`กำลังโหลด AI จดจำใบหน้า ${Math.round((pd*sizes.d + pr*sizes.r)/(sizes.d+sizes.r)*100)}%`); setBar((pd*sizes.d + pr*sizes.r)/(sizes.d+sizes.r)); };
+    const [db, rb] = await Promise.all([
+      fetchModel('models/det_500m.onnx', (g,t)=>{ pd = t ? g/t : 0; show(); }),
+      fetchModel('models/w600k_mbf.onnx', (g,t)=>{ pr = t ? g/t : 0; show(); })
+    ]);
+    setStatus('กำลังเตรียม AI…');
+    det = await ort.InferenceSession.create(db, {executionProviders:['wasm']});
+    rec = await ort.InferenceSession.create(rb, {executionProviders:['wasm']});
+    ready = true; setBar(0); setStatus('AI พร้อมแล้ว');
+    selfies.forEach(s => { if(s.state === 'wait') analyzeSelfie(s); });
+    refresh();
+  }catch(e){ console.error(e); setStatus('โหลด AI ไม่สำเร็จ ตรวจว่าอัปโหลดไฟล์ .onnx ทั้งสองไฟล์ขึ้นไปครบ แล้วรีเฟรชอีกครั้ง', true); }
+}
+
+/* ---------------- image helpers ---------------- */
+async function blobToCanvas(blob, maxSide){
+  let bmp;
+  try{ bmp = await createImageBitmap(blob, {imageOrientation:'from-image'}); }
+  catch(e){
+    const url = URL.createObjectURL(blob);
+    bmp = await new Promise((res,rej)=>{ const i = new Image(); i.onload = ()=>res(i); i.onerror = rej; i.src = url; });
+    URL.revokeObjectURL(url);
+  }
+  const w0 = bmp.width, h0 = bmp.height, k = Math.min(1, maxSide/Math.max(w0,h0));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w0*k)); c.height = Math.max(1, Math.round(h0*k));
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  if(bmp.close) bmp.close();
+  return c;
+}
+const toBlob = (c, q) => new Promise(r => c.toBlob(r, 'image/jpeg', q));
+
+/* ---------------- detection (SCRFD) ---------------- */
+const detCanvas = document.createElement('canvas'); detCanvas.width = detCanvas.height = DET_SIZE;
+const detCtx = detCanvas.getContext('2d', {willReadFrequently:true});
+async function detectRegion(src, rx, ry, rw, rh, thr){
+  const k = DET_SIZE / Math.max(rw, rh);
+  detCtx.fillStyle = '#000'; detCtx.fillRect(0, 0, DET_SIZE, DET_SIZE);
+  detCtx.drawImage(src, rx, ry, rw, rh, 0, 0, Math.round(rw*k), Math.round(rh*k));
+  const px = detCtx.getImageData(0, 0, DET_SIZE, DET_SIZE).data, N = DET_SIZE*DET_SIZE, x = new Float32Array(3*N);
+  for(let i=0;i<N;i++){ x[i] = (px[i*4]-127.5)/128; x[N+i] = (px[i*4+1]-127.5)/128; x[2*N+i] = (px[i*4+2]-127.5)/128; }
+  const out = await det.run({[det.inputNames[0]]: new ort.Tensor('float32', x, [1,3,DET_SIZE,DET_SIZE])});
+  const ts = det.outputNames.map(n => out[n]);
+  const pick = d => ts.filter(t => t.dims[t.dims.length-1] === d).sort((a,b) => b.dims[0]-a.dims[0]);
+  const S = pick(1), B = pick(4), K = pick(10), faces = [];
+  [8,16,32].forEach((s, si) => {
+    const sc = S[si].data, bb = B[si].data, kp = K[si].data, g = DET_SIZE/s;
+    for(let j=0;j<sc.length;j++){
+      if(sc[j] < thr) continue;
+      const a = j >> 1, cx = (a % g)*s, cy = Math.floor(a / g)*s;
+      const x1 = cx - bb[j*4]*s, y1 = cy - bb[j*4+1]*s, x2 = cx + bb[j*4+2]*s, y2 = cy + bb[j*4+3]*s;
+      const kps = []; for(let q=0;q<5;q++) kps.push([(cx + kp[j*10+q*2]*s)/k + rx, (cy + kp[j*10+q*2+1]*s)/k + ry]);
+      faces.push({score: sc[j], box: [x1/k + rx, y1/k + ry, x2/k + rx, y2/k + ry], kps});
+    }
+  });
+  return faces;
+}
+function iou(a, b){
+  const iw = Math.max(0, Math.min(a[2],b[2]) - Math.max(a[0],b[0])), ih = Math.max(0, Math.min(a[3],b[3]) - Math.max(a[1],b[1])), I = iw*ih;
+  return I / ((a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - I || 1);
+}
+function nms(fs, t){ fs.sort((a,b)=>b.score-a.score); const keep = []; for(const f of fs) if(!keep.some(k => iou(k.box, f.box) > t)) keep.push(f); return keep; }
+async function detectAll(canvas, tiles, thr){
+  const W = canvas.width, H = canvas.height; let fs = await detectRegion(canvas, 0, 0, W, H, thr);
+  if(tiles && Math.max(W,H) > 1100){
+    const tw = Math.round(W*0.6), th = Math.round(H*0.6);
+    for(const fx of [0, W-tw]) for(const fy of [0, H-th]){ if(stopFlag) break; fs = fs.concat(await detectRegion(canvas, fx, fy, tw, th, thr)); }
+  }
+  return nms(fs, 0.4).filter(f => (f.box[2]-f.box[0]) >= 16);
+}
+
+/* ---------------- recognition (ArcFace) ---------------- */
+const alignCanvas = document.createElement('canvas'); alignCanvas.width = alignCanvas.height = 112;
+const alignCtx = alignCanvas.getContext('2d', {willReadFrequently:true});
+function simTransform(src){
+  let msx=0,msy=0,mdx=0,mdy=0; for(let i=0;i<5;i++){ msx+=src[i][0]; msy+=src[i][1]; mdx+=ARC[i][0]; mdy+=ARC[i][1]; }
+  msx/=5; msy/=5; mdx/=5; mdy/=5; let n=0,a=0,b=0;
+  for(let i=0;i<5;i++){ const sx=src[i][0]-msx, sy=src[i][1]-msy, dx=ARC[i][0]-mdx, dy=ARC[i][1]-mdy; n+=sx*sx+sy*sy; a+=sx*dx+sy*dy; b+=sx*dy-sy*dx; }
+  a/=n; b/=n; return [a, b, mdx-(a*msx-b*msy), mdy-(b*msx+a*msy)];
+}
+async function embedFaces(canvas, faces){
+  if(!faces.length) return;
+  const n = faces.length, P = 112*112, x = new Float32Array(n*3*P);
+  faces.forEach((f, i) => {
+    const [a,b,tx,ty] = simTransform(f.kps);
+    alignCtx.setTransform(1,0,0,1,0,0); alignCtx.fillStyle = '#000'; alignCtx.fillRect(0,0,112,112);
+    alignCtx.setTransform(a, b, -b, a, tx, ty); alignCtx.imageSmoothingQuality = 'high'; alignCtx.drawImage(canvas, 0, 0);
+    const px = alignCtx.getImageData(0,0,112,112).data, o = i*3*P;
+    for(let p=0;p<P;p++){ x[o+p] = (px[p*4]-127.5)/127.5; x[o+P+p] = (px[p*4+1]-127.5)/127.5; x[o+2*P+p] = (px[p*4+2]-127.5)/127.5; }
+  });
+  alignCtx.setTransform(1,0,0,1,0,0);
+  const out = await rec.run({[rec.inputNames[0]]: new ort.Tensor('float32', x, [n,3,112,112])});
+  const e = out[rec.outputNames[0]].data, D = e.length / n;
+  faces.forEach((f, i) => { const v = e.slice(i*D, (i+1)*D); let s=0; for(const q of v) s+=q*q; s=Math.sqrt(s)||1; for(let q=0;q<D;q++) v[q]/=s; f.emb = v; });
+}
+const dot = (a, b) => { let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; };
+const maxSim = (e, list) => { let m = -1; for(const r of list){ const v = dot(e, r); if(v > m) m = v; } return m; };
+
+/* ---------------- selfies ---------------- */
+async function addSelfies(files){
+  for(const f of files){
+    if(!(f.type||'').startsWith('image/') && !IMG_RE.test(f.name)) continue;
+    if(selfies.length >= 3){ $('selfieMsg').textContent = 'ใส่ได้สูงสุด 3 รูป'; break; }
+    const s = {file:f, url:null, emb:null, state:'wait'};
+    try{ s.url = (await blobToCanvas(f, 300)).toDataURL('image/jpeg', .8); }catch(e){ continue; }
+    selfies.push(s); renderSelfies();
+    if(ready) analyzeSelfie(s);
+  }
+}
+async function analyzeSelfie(s){
+  s.state = 'busy'; renderSelfies();
+  try{
+    const c = await blobToCanvas(s.file, 1280);
+    let fs = await detectAll(c, false, 0.5);
+    if(!fs.length) fs = await detectAll(c, true, 0.35);
+    if(!fs.length) s.state = 'bad';
+    else{
+      fs.sort((a,b) => (b.box[2]-b.box[0])*(b.box[3]-b.box[1]) - (a.box[2]-a.box[0])*(a.box[3]-a.box[1]));
+      await embedFaces(c, [fs[0]]); s.emb = fs[0].emb; s.state = 'ok';
+    }
+  }catch(e){ console.error(e); s.state = 'bad'; }
+  renderSelfies(); refresh(); if(results.length && !running) rescore();
+}
+function renderSelfies(){
+  const L = $('selfieList'); L.innerHTML = '';
+  selfies.forEach((s, i) => {
+    const d = document.createElement('div'); d.className = 'selfie ' + (s.state === 'ok' ? 'ok' : s.state === 'bad' ? 'bad' : '');
+    const im = document.createElement('img'); im.src = s.url; im.alt = 'เซลฟี่ ' + (i+1); d.appendChild(im);
+    const b = document.createElement('button'); b.textContent = 'ลบ'; b.setAttribute('aria-label', 'ลบเซลฟี่ ' + (i+1));
+    b.onclick = () => { selfies.splice(i, 1); renderSelfies(); refresh(); if(results.length && !running) rescore(); };
+    d.appendChild(b); L.appendChild(d);
+  });
+  const bad = selfies.some(s => s.state === 'bad'), busy = selfies.some(s => s.state === 'busy' || (s.state === 'wait' && ready));
+  const m = $('selfieMsg'); m.className = 'msg' + (bad ? ' err' : '');
+  m.textContent = bad ? 'มีรูปที่หาหน้าไม่เจอ (กรอบสีส้ม) ลองใช้รูปที่หน้าชัดกว่านี้' : busy ? 'กำลังอ่านหน้าในเซลฟี่…' : selfies.length ? 'อ่านหน้าเรียบร้อย' : '';
+}
+
+/* ---------------- local files ---------------- */
+function mime(n){ n = n.toLowerCase(); return n.endsWith('.png') ? 'image/png' : n.endsWith('.webp') ? 'image/webp' : n.endsWith('.gif') ? 'image/gif' : 'image/jpeg'; }
+const localItem = f => ({name: f.name, file: f, get: async () => f});
+async function addLocal(files){
+  for(const f of files){
+    if(/\.zip$/i.test(f.name) || /zip/.test(f.type)){
+      setStatus('กำลังแตกไฟล์ ' + f.name + '…');
+      try{
+        const z = await JSZip.loadAsync(f);
+        for(const e of Object.values(z.files)){
+          if(e.dir || /(^|\/)(__MACOSX|\.)/.test(e.name)) continue;
+          if(IMG_RE.test(e.name)){ const b = await e.async('blob'); pool.push(localItem(new File([b], e.name.split('/').pop(), {type: mime(e.name)}))); }
+          else if(HEIC_RE.test(e.name)) skipped++;
+        }
+      }catch(err){ setStatus('เปิดไฟล์ zip ไม่ได้: ' + f.name, true); }
+    } else if(IMG_RE.test(f.name) || ((f.type||'').startsWith('image/') && !HEIC_RE.test(f.name))) pool.push(localItem(f));
+    else if(HEIC_RE.test(f.name)) skipped++;
+  }
+  if(ready) setStatus('AI พร้อมแล้ว');
+  refresh();
+}
+async function readEntries(entry, out){
+  if(entry.isFile) out.push(await new Promise((res,rej) => entry.file(res, rej)));
+  else if(entry.isDirectory){
+    const r = entry.createReader(); let batch;
+    do{ batch = await new Promise((res,rej) => r.readEntries(res, rej)); for(const e of batch) await readEntries(e, out); } while(batch.length);
+  }
+}
+async function filesFromDrop(ev){
+  const items = ev.dataTransfer.items, out = [];
+  if(items && items.length && items[0].webkitGetAsEntry){
+    for(const e of [...items].map(i => i.webkitGetAsEntry()).filter(Boolean)) await readEntries(e, out);
+    return out;
+  }
+  return [...ev.dataTransfer.files];
+}
+function wireDrop(el, input, handler){
+  el.addEventListener('click', () => input.click());
+  el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); input.click(); } });
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', async e => { e.preventDefault(); el.classList.remove('over'); handler(await filesFromDrop(e)); });
+}
+
+/* ---------------- Google Drive ---------------- */
+const DRIVE = 'https://www.googleapis.com/drive/v3/files';
+function folderId(link){
+  const m = link.match(/\/folders\/([\w-]{10,})/) || link.match(/[?&]id=([\w-]{10,})/) || link.match(/^([\w-]{20,})$/);
+  return m ? m[1] : null;
+}
+async function driveErr(res){
+  let reason = ''; try{ const j = await res.json(); reason = (j.error && (j.error.errors?.[0]?.reason || j.error.status)) || ''; }catch(e){}
+  if(res.status === 404) return 'หาโฟลเดอร์ไม่เจอ ตรวจว่าลิงก์ถูก และเปิดแชร์เป็น “ทุกคนที่มีลิงก์” แล้ว';
+  if(res.status === 403 && /rate|quota/i.test(reason)) return 'มีคนใช้เยอะเกินโควตาชั่วคราว รอสักครู่แล้วลองใหม่';
+  if(res.status === 403 || res.status === 400) return 'Google ปฏิเสธ API key (ตรวจว่าเปิด Google Drive API แล้ว และตั้งค่าเว็บไซต์ที่อนุญาตถูกต้อง)';
+  return 'เชื่อมต่อ Google Drive ไม่สำเร็จ (' + res.status + ')';
+}
+async function listDrive(rootId){
+  const folders = [rootId], files = []; let heic = 0;
+  while(folders.length){
+    const id = folders.shift(); let token = '';
+    do{
+      const q = encodeURIComponent(`'${id}' in parents and trashed=false`);
+      const url = `${DRIVE}?q=${q}&fields=nextPageToken,files(id,name,mimeType)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&key=${DRIVE_API_KEY}` + (token ? '&pageToken=' + token : '');
+      const res = await fetch(url); if(!res.ok) throw new Error(await driveErr(res));
+      const j = await res.json(); token = j.nextPageToken || '';
+      for(const f of j.files || []){
+        if(f.mimeType === 'application/vnd.google-apps.folder') folders.push(f.id);
+        else if(HEIC_RE.test(f.name) || /heic|heif/.test(f.mimeType)) heic++;
+        else if((f.mimeType || '').startsWith('image/')) files.push(f);
+      }
+      $('driveMsg').textContent = `เจอแล้ว ${files.length} รูป…`;
+    } while(token);
+  }
+  return {files, heic};
+}
+const driveItem = f => ({name: f.name, get: async () => {
+  for(let tryN = 0; tryN < 3; tryN++){
+    const res = await fetch(`${DRIVE}/${f.id}?alt=media&supportsAllDrives=true&key=${DRIVE_API_KEY}`);
+    if(res.ok) return await res.blob();
+    if(res.status === 403 || res.status === 429){ await new Promise(r => setTimeout(r, 1500*(tryN+1))); continue; }
+    throw new Error(await driveErr(res));
+  }
+  throw new Error('rate');
+}});
+async function loadDrive(){
+  const id = folderId($('driveLink').value.trim()), m = $('driveMsg'); m.className = 'msg';
+  if(!id){ m.className = 'msg err'; m.textContent = 'ลิงก์นี้ไม่ใช่ลิงก์โฟลเดอร์ Google Drive'; return; }
+  $('driveBtn').disabled = true; m.textContent = 'กำลังดึงรายการรูป…';
+  try{
+    const {files, heic} = await listDrive(id);
+    files.forEach(f => pool.push(driveItem(f))); skipped += heic;
+    m.textContent = files.length ? `เพิ่ม ${files.length} รูปจาก Drive แล้ว` : 'ไม่พบรูปในโฟลเดอร์นี้';
+  }catch(e){ m.className = 'msg err'; m.textContent = e.message; }
+  $('driveBtn').disabled = false; refresh();
+}
+
+/* ---------------- scan ---------------- */
+function refresh(){
+  const ok = selfies.some(s => s.state === 'ok');
+  $('poolInfo').textContent = pool.length ? `พร้อมค้นหา ${pool.length.toLocaleString()} รูป` + (skipped ? ` (ข้ามไฟล์ HEIC ${skipped} ไฟล์ ซึ่งเบราว์เซอร์อ่านไม่ได้)` : '') : '';
+  $('clearPool').hidden = !pool.length || running;
+  $('goBtn').disabled = !(ready && ok && pool.length && !running);
+}
+async function run(){
+  running = true; stopFlag = false; refresh();
+  results.forEach(r => r.thumb && URL.revokeObjectURL(r.thumb));
+  results = []; auto = []; confirmed.length = 0; negatives.length = 0; excluded.clear();
+  $('results').style.display = 'block'; $('stopBtn').hidden = false; render();
+  const t0 = performance.now(), AHEAD = 3, pending = new Map();
+  const want = i => { if(i < pool.length && !pending.has(i)) pending.set(i, pool[i].get().catch(e => e)); };
+  for(let i = 0; i < pool.length; i++){
+    if(stopFlag) break;
+    for(let k = 0; k <= AHEAD; k++) want(i + k);
+    const item = pool[i];
+    try{
+      const blob = await pending.get(i); pending.delete(i);
+      if(blob instanceof Error) throw blob;
+      const c = await blobToCanvas(blob, 2400);
+      const faces = await detectAll(c, true, 0.5);
+      await embedFaces(c, faces);
+      const W = c.width, H = c.height;
+      const tc = await blobToCanvas(blob, 560);
+      const r = { item, w: tc.width, h: tc.height, thumb: URL.createObjectURL(await toBlob(tc, .8)),
+        faces: faces.map(f => ({ box: {x:f.box[0]/W, y:f.box[1]/H, w:(f.box[2]-f.box[0])/W, h:(f.box[3]-f.box[1])/H}, emb: f.emb })) };
+      scoreResult(r);
+      if(!item.file && r.best >= thr() - 0.15) r.blob = blob;
+      results.push(r);
+      if(r.best >= thr() - 0.08) appendLive(r);
+    }catch(e){ console.warn('ข้าม', item.name, e); if(/API key|โควตา/.test(e.message || '')){ setStatus(e.message, true); stopFlag = true; } }
+    const el = (performance.now()-t0)/1000, left = Math.round(el/(i+1)*(pool.length-i-1));
+    setBar((i+1)/pool.length);
+    if(!stopFlag) setStatus(`ตรวจแล้ว ${i+1}/${pool.length} รูป` + (left > 3 ? ` · เหลือประมาณ ${left > 90 ? Math.round(left/60) + ' นาที' : left + ' วินาที'}` : ''));
+    await new Promise(r => setTimeout(r, 0));
+  }
+  running = false; $('stopBtn').hidden = true; refresh();
+  if(!/API key|โควตา/.test($('status').textContent)) setStatus(stopFlag ? `หยุดแล้ว ตรวจไป ${results.length} รูป` : `เสร็จแล้ว ตรวจทั้งหมด ${results.length} รูป`);
+  rescore();
+}
+
+/* ---------------- scoring & learning ---------------- */
+const thr = () => +$('thr').value;
+const selfEmbs = () => selfies.filter(s => s.state === 'ok').map(s => s.emb);
+function positives(){ return selfEmbs().concat(confirmed, $('learn').checked ? auto : []); }
+function faceScore(f, pos){
+  const p = maxSim(f.emb, pos);
+  if(negatives.length){ const n = maxSim(f.emb, negatives); if(n > 0.45 && n > p) return -1; }
+  return p;
+}
+function scoreResult(r, pos){
+  pos = pos || positives(); let best = -1, bf = null;
+  r.faces.forEach(f => { f.score = r.rejected && r.rejected.has(f) ? -1 : faceScore(f, pos); if(f.score > best){ best = f.score; bf = f; } });
+  r.best = best; r.bestFace = bf;
+}
+function relearn(){
+  auto = [];
+  if(!$('learn').checked) return;
+  const se = selfEmbs(), cut = Math.max(thr() + 0.12, 0.5), cands = [];
+  results.forEach(r => r.faces.forEach(f => {
+    if(r.rejected && r.rejected.has(f)) return;
+    const s = maxSim(f.emb, se);
+    if(s >= cut && !(negatives.length && maxSim(f.emb, negatives) > s)) cands.push([s, f.emb]);
+  }));
+  cands.sort((a,b) => b[0]-a[0]); auto = cands.slice(0, 15).map(c => c[1]);
+}
+function rescore(){ relearn(); const pos = positives(); results.forEach(r => scoreResult(r, pos)); render(); }
+
+/* ---------------- rendering ---------------- */
+function ring(fig, f, maybe, j){
+  const pad = .42, b = f.box, x = b.x - b.w*pad, y = b.y - b.h*pad, w = b.w*(1+2*pad), h = b.h*(1+2*pad);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'ring' + (maybe ? ' maybe' : '')); svg.setAttribute('viewBox', '0 0 100 100'); svg.setAttribute('preserveAspectRatio', 'none');
+  svg.style.cssText = `left:${x*100}%;top:${y*100}%;width:${w*100}%;height:${h*100}%`;
+  svg.innerHTML = `<ellipse cx="50" cy="50" rx="46" ry="47" transform="rotate(${(j*37 % 9) - 4} 50 50)"${maybe ? '' : ' stroke-dasharray="270 30"'}/>`;
+  fig.querySelector('.imgwrap').appendChild(svg);
+}
+function card(r, maybe){
+  const fig = document.createElement('figure'); fig.className = 'ph' + (!maybe && !excluded.has(r) ? ' sel' : '');
+  const wrap = document.createElement('div'); wrap.className = 'imgwrap';
+  const im = document.createElement('img'); im.src = r.thumb; im.alt = r.item.name; im.loading = 'lazy'; im.width = r.w; im.height = r.h;
+  wrap.appendChild(im); wrap.onclick = () => openLB(r); fig.appendChild(wrap);
+  const t = thr();
+  if(maybe){ if(r.bestFace) ring(fig, r.bestFace, true, 0); }
+  else r.faces.filter(f => f.score >= t).forEach((f, j) => ring(fig, f, false, j + r.item.name.length));
+  if(!maybe){
+    const pk = document.createElement('button'); pk.className = 'pick'; pk.setAttribute('aria-label', 'เลือกรูป ' + r.item.name); pk.setAttribute('aria-pressed', !excluded.has(r));
+    pk.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
+    pk.onclick = e => { e.stopPropagation(); if(excluded.has(r)) excluded.delete(r); else excluded.add(r); fig.classList.toggle('sel', !excluded.has(r)); pk.setAttribute('aria-pressed', !excluded.has(r)); updateCount(); };
+    fig.appendChild(pk);
+  }
+  const fb = document.createElement('div'); fb.className = 'fb';
+  if(r.confirmed){ fb.innerHTML = '<span class="done">ยืนยันแล้วว่าเป็นคุณ</span>'; }
+  else{
+    const yes = document.createElement('button'); yes.textContent = 'ใช่ฉัน';
+    yes.onclick = () => { if(!r.bestFace) return; r.confirmed = true; confirmed.push(r.bestFace.emb); excluded.delete(r); if(!running) rescore(); };
+    const no = document.createElement('button'); no.textContent = 'ไม่ใช่';
+    no.onclick = () => { if(!r.bestFace) return; negatives.push(r.bestFace.emb); (r.rejected ||= new Set()).add(r.bestFace); if(!running) rescore(); else fig.remove(); };
+    fb.append(yes, no);
+  }
+  fig.appendChild(fb);
+  return fig;
+}
+function appendLive(r){
+  const isFound = r.best >= thr();
+  (isFound ? $('grid') : $('maybeGrid')).appendChild(card(r, !isFound));
+  updateCount();
+}
+function render(){
+  const t = thr(), y = window.scrollY;
+  const found = results.filter(r => r.best >= t).sort((a,b) => (b.confirmed - a.confirmed) || b.best - a.best);
+  const maybe = results.filter(r => r.best < t && r.best >= t - 0.08 && !r.confirmed).sort((a,b) => b.best - a.best);
+  $('grid').replaceChildren(...found.map(r => card(r, false)));
+  $('maybeGrid').replaceChildren(...maybe.map(r => card(r, true)));
+  updateCount(); window.scrollTo(0, y);
+}
+function updateCount(){
+  const n = $('grid').children.length, m = $('maybeGrid').children.length;
+  const sel = [...$('grid').children].filter(x => x.classList.contains('sel')).length;
+  $('found').textContent = n.toLocaleString();
+  $('foundSub').textContent = n ? `ที่มีคุณ · เลือกไว้ ${sel} รูป` : 'ที่มีคุณ';
+  $('empty').hidden = !!n || running; $('actions').hidden = !n;
+  $('maybeWrap').hidden = !m; $('maybeN').textContent = m ? `(${m})` : '';
+}
+
+/* ---------------- lightbox & download ---------------- */
+let lbUrl = null;
+async function openLB(r){
+  try{
+    const blob = r.item.file || r.blob || await r.item.get();
+    lbUrl = URL.createObjectURL(blob); $('lbImg').src = lbUrl;
+  }catch(e){ $('lbImg').src = r.thumb; }
+  $('lbImg').alt = r.item.name; $('lbName').textContent = r.item.name; $('lb').showModal();
+}
+$('lbClose').onclick = () => $('lb').close();
+$('lb').addEventListener('click', e => { if(e.target === $('lb')) $('lb').close(); });
+$('lb').addEventListener('close', () => { $('lbImg').src = ''; if(lbUrl){ URL.revokeObjectURL(lbUrl); lbUrl = null; } });
+
+$('dlBtn').onclick = async () => {
+  const t = thr(), list = results.filter(r => r.best >= t && !excluded.has(r));
+  if(!list.length) return;
+  $('dlBtn').disabled = true;
+  try{
+    const z = new JSZip(), used = new Set();
+    for(let i = 0; i < list.length; i++){
+      const r = list[i]; $('dlMsg').textContent = `กำลังรวมไฟล์ ${i+1}/${list.length}…`;
+      const blob = r.item.file || r.blob || await r.item.get();
+      let n = r.item.name, k = 1; while(used.has(n)) n = r.item.name.replace(/(\.[^.]+)?$/, m => `-${k++}${m}`); used.add(n);
+      z.file(n, blob);
+    }
+    const out = await z.generateAsync({type: 'blob', compression: 'STORE'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(out); a.download = 'รูปที่มีหน้าฉัน.zip';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    $('dlMsg').textContent = 'ดาวน์โหลดแล้ว';
+  }catch(e){ console.error(e); $('dlMsg').textContent = 'รวมไฟล์ไม่สำเร็จ ลองอีกครั้ง'; }
+  $('dlBtn').disabled = false;
+};
+$('selAll').onclick = () => { excluded.clear(); render(); };
+$('selNone').onclick = () => { results.forEach(r => excluded.add(r)); render(); };
+
+/* ---------------- wiring ---------------- */
+function tab(drive){
+  $('tabDrive').setAttribute('aria-selected', drive); $('tabLocal').setAttribute('aria-selected', !drive);
+  $('paneDrive').hidden = !drive; $('paneLocal').hidden = drive;
+}
+$('tabDrive').onclick = () => tab(true); $('tabLocal').onclick = () => tab(false);
+if(!DRIVE_API_KEY){ $('tabDrive').hidden = true; tab(false); $('tabLocal').hidden = true; }
+$('driveBtn').onclick = loadDrive;
+$('driveLink').addEventListener('keydown', e => { if(e.key === 'Enter') loadDrive(); });
+wireDrop($('selfieDrop'), $('selfieInput'), addSelfies);
+$('selfieInput').onchange = e => { addSelfies([...e.target.files]); e.target.value = ''; };
+wireDrop($('poolDrop'), $('poolInput'), addLocal);
+$('pickFiles').onclick = () => $('poolInput').click();
+$('pickFolder').onclick = () => $('folderInput').click();
+$('poolInput').onchange = e => { addLocal([...e.target.files]); e.target.value = ''; };
+$('folderInput').onchange = e => { addLocal([...e.target.files]); e.target.value = ''; };
+$('clearPool').onclick = () => { pool = []; skipped = 0; $('driveMsg').textContent = ''; refresh(); };
+$('goBtn').onclick = run;
+$('stopBtn').onclick = () => { stopFlag = true; };
+let tT; $('thr').oninput = () => { clearTimeout(tT); tT = setTimeout(() => { if(!running) rescore(); }, 120); };
+$('learn').onchange = () => { if(!running) rescore(); };
+
+initAI();
+})();
+</script>
+</body>
+</html>
