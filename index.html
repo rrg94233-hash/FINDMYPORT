@@ -10,13 +10,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
 <script>window.coi = { coepCredentialless: () => true, quiet: true };</script>
 <script src="coi-serviceworker.js"></script>
-<script>
-/* ===================== ตั้งค่า =====================
-   ใส่ Google API key ของคุณระหว่างเครื่องหมาย '' ด้านล่าง
-   ถ้าเว้นว่างไว้ เว็บยังใช้ได้ แต่จะไม่มีโหมดวางลิงก์ Drive
-   ================================================== */
-const DRIVE_API_KEY = 'AIzaSyDEP2vvbwFdtffINN6qcSdo8TgsNtlPfLk';
-</script>
+<script>window.DRIVE_API_KEY = '';</script>
+<!-- ใส่ API key ในไฟล์ config.js (ไฟล์แยก) อัปเดตเว็บครั้งต่อไปจะไม่ทับ key -->
+<script src="config.js"></script>
+<script>const DRIVE_API_KEY = (window.DRIVE_API_KEY || '').trim();</script>
 <style>
 :root{
   --paper:#F1F4F0;--card:#FFFFFF;--ink:#17201C;--muted:#56645D;--line:#D3DAD4;
@@ -62,6 +59,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .selfie img{width:100%;height:100%;object-fit:cover}
 .selfie.ok{border-color:var(--forest)}
 .selfie.bad{border-color:var(--warn)}
+.selfie .ang{position:absolute;inset:0 0 auto 0;padding:1px 0;font-size:11px;text-align:center;background:rgba(0,0,0,.5);color:#fff;line-height:1.4}
 .selfie button{position:absolute;inset:auto 0 0 0;border:0;border-radius:0;padding:2px;font-size:12px;min-height:0;background:rgba(0,0,0,.55);color:#fff}
 .msg{font-size:14px;margin-top:8px;color:var(--muted)}
 .msg.err{color:var(--warn)}
@@ -82,6 +80,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .src .ct{flex:none;font-size:14px;color:var(--muted)}
 .src button{flex:none;min-height:32px;width:32px;padding:0;border:0;border-radius:8px;font-size:18px;line-height:1;color:var(--muted)}
 .src button:hover{background:var(--card);color:var(--ink)}
+.restored{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--soft);border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:15px}
+.restored[hidden]{display:none}
+.restored button{min-height:34px;padding:4px 14px;font-size:14px}
 .mode{font-size:14px;color:var(--muted);max-width:22em;text-align:right}
 @media (max-width:520px){.mode{text-align:left}}
 input[type=range],input[type=checkbox]{accent-color:var(--forest)}
@@ -134,7 +135,7 @@ dialog .cap button{color:#e8ece9;border-color:#666}
   <div class="steps">
     <section class="step" aria-labelledby="s1">
       <h2 id="s1"><span class="n">1</span>เซลฟี่ของคุณ</h2>
-      <p class="hint">1–3 รูป หน้าเห็นชัด ถ้าได้หลายมุมจะแม่นขึ้น</p>
+      <p class="hint">ใส่ได้ 5 รูป ยิ่งหลายมุมยิ่งเจอรูปที่หันข้าง แนะนำ: หน้าตรง · หันไปทางซ้ายครึ่งหนึ่ง · หันไปทางขวาครึ่งหนึ่ง · ก้มเล็กน้อย · ยิ้ม</p>
       <div class="drop" id="selfieDrop" tabindex="0" role="button" aria-label="เลือกรูปเซลฟี่">
         <strong>เลือกรูปเซลฟี่</strong><span>แตะเพื่อเลือกรูปหรือถ่ายใหม่</span>
       </div>
@@ -189,6 +190,7 @@ dialog .cap button{color:#e8ece9;border-color:#666}
       <div class="count"><span id="found">0</span> รูป<small id="foundSub">ที่มีคุณ</small></div>
       <div class="mode">โหมดเข้มงวด แสดงเฉพาะรูปที่มั่นใจว่าเป็นคุณ รูปที่ก้ำกึ่งอยู่ในส่วน “อาจจะใช่” ด้านล่าง</div>
     </div>
+    <div class="restored" id="restored" hidden><span id="restoredMsg"></span><button id="resetAll">ล้างผลทั้งหมดแล้วเริ่มใหม่</button></div>
     <div class="grid found" id="grid"></div>
     <div class="empty" id="empty" hidden>ยังไม่เจอรูปที่มั่นใจว่ามีคุณ ลองดูในส่วน “อาจจะใช่” ด้านล่าง หรือเพิ่มเซลฟี่อีกมุม</div>
     <div class="actions" id="actions" hidden>
@@ -224,7 +226,8 @@ window.ortLoaded = new Promise((resolve, reject) => {
 const $ = id => document.getElementById(id);
 const IMG_RE = /\.(jpe?g|png|webp|gif|bmp)$/i, HEIC_RE = /\.(heic|heif)$/i;
 const ARC = [[38.2946,51.6963],[73.5318,51.5014],[56.0252,71.7366],[41.5493,92.3655],[70.7299,92.2041]];
-const CAND = 0.15;            // คะแนนจากโมเดลเร็วที่ต้องส่งไปตรวจซ้ำด้วยโมเดลละเอียด
+const CAND = 0.25;            // คะแนนจากโมเดลเร็วที่ต้องส่งไปตรวจซ้ำด้วยโมเดลละเอียด
+const SMALL = 40, SMALL_PEN = 0.04;   // หน้าเล็กมาก (กว้างไม่ถึง 40px) ภาพไม่ชัด ต้องคะแนนสูงขึ้นอีกนิดถึงจะนับ
 const MOBILE = matchMedia('(pointer:coarse)').matches;
 
 let det = null, recM = null, recR = null, GPU = false, ready = false, running = false, stopFlag = false;
@@ -310,6 +313,7 @@ async function initAI(){
     ready = true; setBar(0);
     setStatus((recR ? 'AI พร้อมแล้ว (โหมดแม่นยำสูง' : 'AI พร้อมแล้ว (โหมดปกติ ไม่พบไฟล์โมเดลแม่นยำสูง') + (GPU ? ' · ใช้การ์ดจอเร่งความเร็ว)' : ')'));
     selfies.forEach(s => { if(s.state === 'wait') analyzeSelfie(s); });
+    try{ await restoreSession(); }catch(e){ console.warn('restore failed', e); }
     refresh();
   }catch(e){ console.error(e); setStatus('โหลด AI ไม่สำเร็จ ตรวจว่าอัปโหลดไฟล์ในโฟลเดอร์ models ครบ แล้วรีเฟรชอีกครั้ง', true); }
 }
@@ -422,6 +426,16 @@ async function embedTTA(sess, px){
   const [a] = await embed(sess, [px], false), [b] = await embed(sess, [px], true);
   return norm(a.map((v,i) => v + b[i]));
 }
+// มุมหันของหน้า จากตำแหน่งตาและจมูก: 0 = หน้าตรง, ยิ่งมากยิ่งหันข้าง, เครื่องหมายบอกว่าหันไปด้านไหนของภาพ
+function yawOf(k){
+  const ex = k[1][0]-k[0][0], ey = k[1][1]-k[0][1], d = Math.hypot(ex, ey) || 1;
+  const mx = (k[0][0]+k[1][0])/2, my = (k[0][1]+k[1][1])/2;
+  const nx = k[2][0]-mx, ny = k[2][1]-my;
+  return (nx*ex + ny*ey) / (d*d);
+}
+const SIDE = 0.28;                       // หันเกินนี้ถือว่าเป็นหน้าข้าง
+const yawBin = y => Math.abs(y) < 0.12 ? 0 : (y < 0 ? -1 : 1) * (Math.abs(y) < SIDE ? 1 : 2);
+const yawLabel = y => Math.abs(y) < 0.12 ? 'หน้าตรง' : Math.abs(y) < SIDE ? 'เอียงเล็กน้อย' : 'หันข้าง';
 const dot = (a, b) => { let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; };
 const maxSim = (e, list) => { let m = -1; for(const r of list){ const v = dot(e, r); if(v > m) m = v; } return m; };
 async function pxFromBlob(blob){
@@ -433,7 +447,7 @@ async function pxFromBlob(blob){
 async function addSelfies(files){
   for(const f of files){
     if(!(f.type||'').startsWith('image/') && !IMG_RE.test(f.name)) continue;
-    if(selfies.length >= 3){ $('selfieMsg').textContent = 'ใส่ได้สูงสุด 3 รูป'; break; }
+    if(selfies.length >= 5){ $('selfieMsg').textContent = 'ใส่ได้สูงสุด 5 รูป'; break; }
     const s = {file:f, url:null, M:null, R:null, state:'wait'};
     try{ s.url = (await blobToCanvas(f, 300)).toDataURL('image/jpeg', .8); }catch(e){ continue; }
     selfies.push(s); renderSelfies();
@@ -449,10 +463,11 @@ async function analyzeSelfie(s){
     if(!fs.length) s.state = 'bad';
     else{
       fs.sort((a,b) => (b.box[2]-b.box[0])*(b.box[3]-b.box[1]) - (a.box[2]-a.box[0])*(a.box[3]-a.box[1]));
+      s.yaw = yawOf(fs[0].kps);
       const px = alignPixels(c, fs[0].kps);
       s.M = await embedTTA(recM, px);
       if(recR) s.R = await embedTTA(recR, px);
-      s.state = 'ok';
+      s.state = 'ok'; store.saveMeta();
     }
   }catch(e){ console.error(e); s.state = 'bad'; }
   renderSelfies(); refresh(); if(results.length && !running) rescore();
@@ -462,18 +477,29 @@ function renderSelfies(){
   selfies.forEach((s, i) => {
     const d = document.createElement('div'); d.className = 'selfie ' + (s.state === 'ok' ? 'ok' : s.state === 'bad' ? 'bad' : '');
     const im = document.createElement('img'); im.src = s.url; im.alt = 'เซลฟี่ ' + (i+1); d.appendChild(im);
+    if(s.state === 'ok' && s.yaw != null){ const tg = document.createElement('span'); tg.className = 'ang'; tg.textContent = yawLabel(s.yaw); d.appendChild(tg); }
     const b = document.createElement('button'); b.textContent = 'ลบ'; b.setAttribute('aria-label', 'ลบเซลฟี่ ' + (i+1));
-    b.onclick = () => { selfies.splice(i, 1); renderSelfies(); refresh(); if(results.length && !running) rescore(); };
+    b.onclick = () => { selfies.splice(i, 1); store.saveMeta(); renderSelfies(); refresh(); if(results.length && !running) rescore(); };
     d.appendChild(b); L.appendChild(d);
   });
   const bad = selfies.some(s => s.state === 'bad'), busy = selfies.some(s => s.state === 'busy' || (s.state === 'wait' && ready));
   const m = $('selfieMsg'); m.className = 'msg' + (bad ? ' err' : '');
-  m.textContent = bad ? 'มีรูปที่หาหน้าไม่เจอ (กรอบสีส้ม) ลองใช้รูปที่หน้าชัดกว่านี้' : busy ? 'กำลังอ่านหน้าในเซลฟี่…' : selfies.length ? 'อ่านหน้าเรียบร้อย' : '';
+  let tip = '';
+  const ok = selfies.filter(s => s.state === 'ok' && s.yaw != null);
+  if(ok.length){
+    const hasFront = ok.some(s => Math.abs(s.yaw) < 0.12), hasA = ok.some(s => s.yaw <= -0.12), hasB = ok.some(s => s.yaw >= 0.12);
+    const need = [];
+    if(!hasFront) need.push('หน้าตรง');
+    if(!hasA && !hasB) need.push('หันข้างทั้งสองด้าน');
+    else if(!hasA || !hasB) need.push('หันอีกด้านหนึ่ง');
+    tip = need.length && selfies.length < 5 ? ' · ถ้าเพิ่มรูป' + need.join(' และ') + ' จะเจอรูปที่หันข้างได้มากขึ้น' : ' · ครบหลายมุมแล้ว';
+  }
+  m.textContent = bad ? 'มีรูปที่หาหน้าไม่เจอ (กรอบสีส้ม) ลองใช้รูปที่หน้าชัดกว่านี้' : busy ? 'กำลังอ่านหน้าในเซลฟี่…' : selfies.length ? 'อ่านหน้าเรียบร้อย' + tip : '';
 }
 
 /* ---------------- local files ---------------- */
 function mime(n){ n = n.toLowerCase(); return n.endsWith('.png') ? 'image/png' : n.endsWith('.webp') ? 'image/webp' : n.endsWith('.gif') ? 'image/gif' : 'image/jpeg'; }
-const localItem = (f, src) => ({name: f.name, file: f, src, get: async () => f});
+const localItem = (f, src) => ({name: f.name, file: f, src, key: 'f:' + (f.webkitRelativePath || f.name) + '|' + f.size + '|' + f.lastModified, get: async () => f});
 const FOLDER_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>';
 const ZIP_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M11 6h2M11 9h2M11 12h2M11 15h2v3h-2z"/></svg>';
 const IMG_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>';
@@ -509,7 +535,7 @@ async function addLocal(files, folderName){
         // อ่านรูปออกจาก zip ทีละรูปตอนสแกน ไม่โหลดทั้งหมดเข้าหน่วยความจำพร้อมกัน
         for(const e of entries){
           const name = e.name.split('/').pop();
-          pool.push({name, src: id, get: async () => new File([await e.async('blob')], name, {type: mime(name)})});
+          pool.push({name, src: id, key: 'z:' + f.name + '/' + e.name + '|' + ((e._data && e._data.uncompressedSize) || ''), get: async () => new File([await e.async('blob')], name, {type: mime(name)})});
         }
         if(!entries.length) setStatus('ไม่พบรูปในไฟล์ ' + f.name, true);
       }catch(err){ setStatus('เปิดไฟล์ zip ไม่ได้: ' + f.name, true); }
@@ -583,15 +609,16 @@ async function listDrive(rootId){
   }
   return {files, heic};
 }
-const driveItem = f => ({name: f.name, get: async () => {
+const driveFetch = id => async () => {
   for(let tryN = 0; tryN < 3; tryN++){
-    const res = await fetch(`${DRIVE}/${f.id}?alt=media&supportsAllDrives=true&key=${DRIVE_API_KEY}`);
+    const res = await fetch(`${DRIVE}/${id}?alt=media&supportsAllDrives=true&key=${DRIVE_API_KEY}`);
     if(res.ok) return await res.blob();
     if(res.status === 403 || res.status === 429){ await new Promise(r => setTimeout(r, 1500*(tryN+1))); continue; }
     throw new Error(await driveErr(res));
   }
   throw new Error('rate');
-}});
+};
+const driveItem = f => ({name: f.name, driveId: f.id, key: 'd:' + f.id, get: driveFetch(f.id)});
 const id_short = s => s.slice(0, 6) + '…';
 async function loadDrive(){
   const id = folderId($('driveLink').value.trim()), m = $('driveMsg'); m.className = 'msg';
@@ -618,16 +645,21 @@ function faceScore(f, PM, PR){
     const p = maxSim(f.R, PR);
     const negs = negatives.map(n=>n.R).filter(Boolean);
     if(negs.length){ const n = maxSim(f.R, negs); if(n > 0.45 && n > p) return -1; }
-    return p;
+    return p - (f.px && f.px < SMALL ? SMALL_PEN : 0);
   }
   const p = maxSim(f.M, PM);
   if(negatives.length){ const n = maxSim(f.M, negatives.map(n=>n.M)); if(n > 0.45 && n > p) return -1; }
-  return p;
+  return p - (f.px && f.px < SMALL ? SMALL_PEN : 0);
 }
+// รูปที่ก้ำกึ่ง: หน้าข้างได้ช่องกว้างกว่า เพราะคะแนนหน้าข้างต่ำกว่าปกติแม้เป็นคนเดียวกัน
+const maybeBand = f => f && Math.abs(f.yaw || 0) >= SIDE ? 0.15 : 0.08;
+function isMaybe(r){ const t = thr(); return r.best < t && !r.confirmed && r.faces.some(f => f.score >= t - maybeBand(f)); }
 function scoreResult(r, PM, PR){
   let best = -1, bf = null;
   r.faces.forEach(f => { f.score = r.rejected && r.rejected.has(f) ? -1 : faceScore(f, PM, PR); if(f.score > best){ best = f.score; bf = f; } });
   r.best = best; r.bestFace = bf;
+  // ในส่วนอาจจะใช่ ให้วงหน้าที่ใกล้เกณฑ์ที่สุดเมื่อคิดตามมุมหน้า
+  if(best < thr()){ let m = -9; r.faces.forEach(f => { const g = f.score - (thr() - maybeBand(f)); if(g > m){ m = g; r.maybeFace = f; } }); } else r.maybeFace = bf;
 }
 // ตรวจซ้ำด้วยโมเดลละเอียดเฉพาะหน้าที่โมเดลเร็วบอกว่าน่าจะใช่
 async function upgradeFaces(list){
@@ -637,16 +669,38 @@ async function upgradeFaces(list){
     try{ const px = await pxFromBlob(f.crop); f.R = (await embed(recR, [px], false))[0]; }catch(e){}
   }
 }
+// เรียนหน้าคุณจากรูปค่ายที่มั่นใจมาก โดยตั้งใจเก็บให้ครบหลายมุม (ตรง / เอียง / หันข้าง ทั้งสองด้าน)
+// รอบที่ 2 ใช้หน้าที่เรียนได้ในรอบแรกเป็น "สะพาน" ไปหาหน้าที่หันมากขึ้นอีก แต่ต้องมั่นใจสูงกว่าเดิม
 function relearn(){
   auto = [];
-  const useR = !!recR, se = useR ? selfR() : selfM(), cut = thr() + 0.14, cands = [];
+  const useR = !!recR, emb = f => useR ? f.R : f.M;
+  const negs = negatives.map(n => useR ? n.R : n.M).filter(Boolean);
+  const base = (useR ? selfR() : selfM()).concat(confirmed.map(c => useR ? c.R : c.M).filter(Boolean));
+  if(!base.length) return;
+  const facesPool = [];
   results.forEach(r => r.faces.forEach(f => {
     if(r.rejected && r.rejected.has(f)) return;
-    const e = useR ? f.R : f.M; if(!e) return;
-    const s = maxSim(e, se);
-    if(s >= cut) cands.push([s, f]);
+    const e = emb(f); if(!e) return;
+    if(f.px && f.px < SMALL) return;                       // หน้าเล็กเกินไป ภาพไม่ชัด ไม่เอามาเรียน
+    if(negs.length && maxSim(e, negs) > 0.45) return;     // คล้ายคนที่คุณบอกว่า "ไม่ใช่"
+    facesPool.push(f);
   }));
-  cands.sort((a,b) => b[0]-a[0]); auto = cands.slice(0, 15).map(c => ({M:c[1].M, R:c[1].R}));
+  const PER_BIN = 3, MAX = 20, chosen = new Set(), count = {};
+  const pick = (refs, cut) => {
+    const c = [];
+    for(const f of facesPool){ if(chosen.has(f)) continue; const s = maxSim(emb(f), refs); if(s >= cut) c.push([s, f]); }
+    c.sort((a,b) => b[0]-a[0]);
+    for(const [, f] of c){
+      if(chosen.size >= MAX) break;
+      const b = yawBin(f.yaw || 0);
+      if((count[b] || 0) >= PER_BIN) continue;
+      count[b] = (count[b] || 0) + 1; chosen.add(f);
+    }
+  };
+  pick(base, thr() + 0.14);
+  const hop1 = [...chosen].map(emb);
+  if(hop1.length) pick(base.concat(hop1), thr() + 0.18);
+  auto = [...chosen].map(f => ({M: f.M, R: f.R}));
 }
 let gen = 0;
 async function rescore(){
@@ -655,80 +709,172 @@ async function rescore(){
   const PM = posM();
   if(recR){
     const need = [];
-    results.forEach(r => r.faces.forEach(f => { if(!f.R && f.crop && maxSim(f.M, PM) >= CAND) need.push(f); }));
+    results.forEach(r => r.faces.forEach(f => { if(!f.R && f.crop && maxSim(f.M, PM) >= (Math.abs(f.yaw || 0) >= SIDE ? CAND - 0.08 : CAND)) need.push(f); }));
     if(need.length){
       setStatus(`กำลังตรวจซ้ำอีก ${need.length} หน้าให้ละเอียดขึ้น…`);
       await upgradeFaces(need);
       if(my !== gen) return;
+      store.saveAll();
       setStatus(`เสร็จแล้ว ตรวจทั้งหมด ${results.length} รูป`);
     }
   }
   const PR = posR();
   results.forEach(r => scoreResult(r, PM, PR));
   render();
+  if(!running) results.forEach(r => { if(!r.blob && r.item.file && r.best >= thr() - 0.18){ r.blob = r.item.file; store.saveResult(r); } });
 }
 
 /* ---------------- scan ---------------- */
 function refresh(){
+  if(results.length && pool.length){ const byKey = new Map(pool.map(it => [it.key, it])); results.forEach(r => { const it = byKey.get(r.key); if(it && !r.item.get) r.item = it; }); }
   const ok = selfies.some(s => s.state === 'ok');
   renderSources();
   $('poolInfo').textContent = pool.length ? `รวม ${pool.length.toLocaleString()} รูป พร้อมค้นหา` + (skipped ? ` (ข้ามไฟล์ HEIC ${skipped} ไฟล์ ซึ่งเบราว์เซอร์อ่านไม่ได้)` : '') : '';
   $('clearPool').hidden = sources.length < 2 || running;
   $('goBtn').disabled = !(ready && ok && pool.length && !running);
 }
+function crop112(px){
+  const cc = document.createElement('canvas'); cc.width = cc.height = 112;
+  cc.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(px), 112, 112), 0, 0);
+  return toBlob(cc, .92);
+}
 async function run(){
   running = true; stopFlag = false; refresh(); gen++;
-  results.forEach(r => r.thumb && URL.revokeObjectURL(r.thumb));
-  results = []; auto = []; confirmed.length = 0; negatives.length = 0; excluded.clear();
+  const done = new Set(results.map(r => r.key));
+  const todo = pool.filter(it => !done.has(it.key));
+  // ผูกรูปที่สแกนไว้แล้ว (จากครั้งก่อน) กับไฟล์ที่เพิ่งใส่ จะได้บันทึกรูปขนาดเต็มได้
+  const byKey = new Map(pool.map(it => [it.key, it]));
+  results.forEach(r => { const it = byKey.get(r.key); if(it && !r.item.get) r.item = it; });
   $('results').style.display = 'block'; $('stopBtn').hidden = false; render();
-  const t0 = performance.now(), AHEAD = 3, pending = new Map();
-  const want = i => { if(i < pool.length && !pending.has(i)) pending.set(i, pool[i].get().catch(e => e)); };
-  for(let i = 0; i < pool.length; i++){
+  if(!todo.length){ running = false; $('stopBtn').hidden = true; refresh(); setStatus(`รูปทั้งหมด ${pool.length} รูปตรวจไปแล้ว ผลอยู่ด้านล่าง`); rescore(); return; }
+  const t0 = performance.now(), AHEAD = 3, blobs = new Map(), decoded = new Map();
+  const wantBlob = i => { if(i < todo.length && !blobs.has(i)) blobs.set(i, todo[i].get().catch(e => e)); return blobs.get(i); };
+  // ถอดรหัสรูปถัดไปรอไว้ระหว่างที่ AI ทำงานกับรูปปัจจุบัน
+  const wantDecode = i => { if(i < todo.length && !decoded.has(i)) decoded.set(i, (async () => { const b = await wantBlob(i); if(b instanceof Error) return b; return {blob: b, c: await blobToCanvas(b, 1920)}; })().catch(e => e)); return decoded.get(i); };
+  const skippedBefore = pool.length - todo.length;
+  for(let i = 0; i < todo.length; i++){
     if(stopFlag) break;
-    for(let k = 0; k <= AHEAD; k++) want(i + k);
-    const item = pool[i];
+    for(let k = 0; k <= AHEAD; k++) wantBlob(i + k);
+    const item = todo[i];
     try{
-      const blob = await pending.get(i); pending.delete(i);
-      if(blob instanceof Error) throw blob;
-      const c = await blobToCanvas(blob, 1920);
+      const d = await wantDecode(i); wantDecode(i + 1); blobs.delete(i); decoded.delete(i);
+      if(d instanceof Error) throw d;
+      const {blob, c} = d;
       const dets = await detectAll(c, 640, 0.5, true);
       const pxs = dets.map(f => alignPixels(c, f.kps));
       const Ms = await embed(recM, pxs, false);
-      const PM = posM(), W = c.width, H = c.height;
-      const faces = [];
+      const PM = posM(), W = c.width, H = c.height, faces = [], candIdx = [];
       for(let j=0;j<dets.length;j++){
-        const f = dets[j], face = { box: {x:f.box[0]/W, y:f.box[1]/H, w:(f.box[2]-f.box[0])/W, h:(f.box[3]-f.box[1])/H}, M: Ms[j], R: null, crop: null };
-        if(recR && maxSim(face.M, PM) >= CAND) face.R = (await embed(recR, [pxs[j]], false))[0];
-        else if(recR){
-          // เก็บภาพหน้าไว้เล็กๆ เผื่อระบบเรียนรู้แล้วต้องกลับมาตรวจซ้ำ
-          const cc = document.createElement('canvas'); cc.width = cc.height = 112;
-          cc.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pxs[j]), 112, 112), 0, 0);
-          face.crop = await toBlob(cc, .92);
-        }
-        faces.push(face);
+        const f = dets[j];
+        const yaw = yawOf(f.kps);
+        faces.push({ box: {x:f.box[0]/W, y:f.box[1]/H, w:(f.box[2]-f.box[0])/W, h:(f.box[3]-f.box[1])/H}, px: f.box[2]-f.box[0], yaw, M: Ms[j], R: null, crop: null });
+        // หน้าข้าง คะแนนจากตัวกรองชั้นแรกจะต่ำกว่าปกติ จึงส่งไปตรวจละเอียดง่ายกว่า
+        if(recR && maxSim(Ms[j], PM) >= (Math.abs(yaw) >= SIDE ? CAND - 0.08 : CAND)) candIdx.push(j);
       }
-      const tk = Math.min(1, 560/Math.max(c.width, c.height)), tc = document.createElement('canvas');
-      tc.width = Math.round(c.width*tk); tc.height = Math.round(c.height*tk); tc.getContext('2d').drawImage(c, 0, 0, tc.width, tc.height);
-      const r = { item, w: tc.width, h: tc.height, thumb: URL.createObjectURL(await toBlob(tc, .8)), faces };
+      if(recR){
+        // ตรวจละเอียดเฉพาะหน้าที่น่าจะใช่ ส่งเป็นชุดเดียวเพื่อความเร็ว
+        const Rs = await embed(recR, candIdx.map(j => pxs[j]), false);
+        candIdx.forEach((j, n) => faces[j].R = Rs[n]);
+        // หน้าที่คะแนนก้ำกึ่ง ตรวจซ้ำอีกรอบแบบกลับด้าน แล้วเฉลี่ยผล เพื่อลดการตัดสินผิด
+        const PR = posR(), T = thr();
+        for(const j of candIdx){
+          const s = maxSim(faces[j].R, PR);
+          if(s > T - 0.10 && s < T + 0.06){
+            const [fl] = await embed(recR, [pxs[j]], true);
+            faces[j].R = norm(faces[j].R.map((v, q) => v + fl[q]));
+          }
+        }
+        for(let j=0;j<faces.length;j++) if(!faces[j].R) faces[j].crop = await crop112(pxs[j]);
+      }
+      const tk = Math.min(1, 560/Math.max(W, H)), tc = document.createElement('canvas');
+      tc.width = Math.round(W*tk); tc.height = Math.round(H*tk); tc.getContext('2d').drawImage(c, 0, 0, tc.width, tc.height);
+      const thumbBlob = await toBlob(tc, .8);
+      const r = { key: item.key, item, w: tc.width, h: tc.height, thumbBlob, thumb: URL.createObjectURL(thumbBlob), faces };
       scoreResult(r, PM, posR());
-      if(!item.file && r.best >= thr() - 0.15) r.blob = blob;
+      if(r.best >= thr() - 0.18) r.blob = blob;
       results.push(r);
-      if(r.best >= thr() - 0.08) appendLive(r);
+      store.saveResult(r);
+      if(r.best >= thr() || isMaybe(r)) appendLive(r);
     }catch(e){ console.warn('ข้าม', item.name, e); if(/API key|โควตา/.test(e.message || '')){ setStatus(e.message, true); stopFlag = true; } }
-    const el = (performance.now()-t0)/1000, left = Math.round(el/(i+1)*(pool.length-i-1));
-    setBar((i+1)/pool.length);
-    if(!stopFlag) setStatus(`ตรวจแล้ว ${i+1}/${pool.length} รูป` + (left > 3 ? ` · เหลือประมาณ ${left > 90 ? Math.round(left/60) + ' นาที' : left + ' วินาที'}` : ''));
+    const el = (performance.now()-t0)/1000, left = Math.round(el/(i+1)*(todo.length-i-1));
+    setBar((i+1)/todo.length);
+    if(!stopFlag) setStatus(`ตรวจแล้ว ${skippedBefore + i + 1}/${pool.length} รูป` + (left > 3 ? ` · เหลือประมาณ ${left > 90 ? Math.round(left/60) + ' นาที' : left + ' วินาที'}` : ''));
     await new Promise(r => setTimeout(r, 0));
   }
   running = false; $('stopBtn').hidden = true; refresh();
-  if(!/API key|โควตา/.test($('status').textContent)) setStatus(stopFlag ? `หยุดแล้ว ตรวจไป ${results.length} รูป` : `เสร็จแล้ว ตรวจทั้งหมด ${results.length} รูป`);
+  if(!/API key|โควตา/.test($('status').textContent)) setStatus(stopFlag ? `หยุดแล้ว ตรวจไป ${results.length} รูป (กดเริ่มอีกครั้งเพื่อตรวจต่อจากเดิม)` : `เสร็จแล้ว ตรวจทั้งหมด ${results.length} รูป`);
   rescore();
+}
+
+/* ---------------- จำผลไว้ในเครื่อง (รีเฟรชแล้วไม่หาย) ---------------- */
+const store = (() => {
+  let dbp = null;
+  const open = () => dbp ||= new Promise((res, rej) => {
+    try{
+      const q = indexedDB.open('findmyface', 1);
+      q.onupgradeneeded = () => { q.result.createObjectStore('results', {keyPath: 'key'}); q.result.createObjectStore('meta'); };
+      q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+    }catch(e){ rej(e); }
+  });
+  const tx = async (name, mode, fn) => { try{ const db = await open(); return await new Promise((res, rej) => { const t = db.transaction(name, mode), s = t.objectStore(name); const out = fn(s); t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error); }); }catch(e){ console.warn('store', e); } };
+  const pack = r => ({ key: r.key, name: r.item.name, driveId: r.item.driveId || null, w: r.w, h: r.h, thumbBlob: r.thumbBlob,
+    full: r.blob || (r.best >= thr() - 0.18 && r.item.file) || null, confirmed: !!r.confirmed, excluded: excluded.has(r),
+    rejected: r.rejected ? [...r.rejected].map(f => r.faces.indexOf(f)) : [],
+    faces: r.faces.map(f => ({box: f.box, px: f.px, yaw: f.yaw, M: f.M, R: f.R, crop: f.crop})) });
+  let metaT;
+  return {
+    saveResult: r => tx('results', 'readwrite', s => s.put(pack(r))),
+    saveAll: () => tx('results', 'readwrite', s => { results.forEach(r => s.put(pack(r))); }),
+    saveMeta: () => { clearTimeout(metaT); metaT = setTimeout(() => tx('meta', 'readwrite', s => s.put({
+      selfies: selfies.filter(x => x.state === 'ok').map(x => ({url: x.url, M: x.M, R: x.R, yaw: x.yaw})),
+      confirmed, negatives }, 'session')), 300); },
+    load: async () => {
+      const meta = await tx('meta', 'readonly', s => s.get('session'));
+      const rows = await tx('results', 'readonly', s => s.getAll());
+      return {meta, rows: rows || []};
+    },
+    clear: () => Promise.all([tx('results', 'readwrite', s => s.clear()), tx('meta', 'readwrite', s => s.clear())])
+  };
+})();
+async function restoreSession(){
+  const {meta, rows} = await store.load();
+  if(meta && meta.selfies && meta.selfies.length && !selfies.length){
+    meta.selfies.forEach(x => selfies.push({file: null, url: x.url, M: x.M, R: x.R, yaw: x.yaw, state: 'ok'}));
+    renderSelfies();
+  }
+  if(meta){ (meta.confirmed || []).forEach(c => confirmed.push(c)); (meta.negatives || []).forEach(n => negatives.push(n)); }
+  if(!rows.length){ refresh(); return; }
+  for(const row of rows){
+    const item = {name: row.name, key: row.key, driveId: row.driveId};
+    if(row.driveId && DRIVE_API_KEY) item.get = driveFetch(row.driveId);
+    const r = { key: row.key, item, w: row.w, h: row.h, thumbBlob: row.thumbBlob, thumb: URL.createObjectURL(row.thumbBlob), blob: row.full || null,
+      confirmed: row.confirmed, faces: row.faces };
+    if(row.rejected && row.rejected.length) r.rejected = new Set(row.rejected.map(i => r.faces[i]).filter(Boolean));
+    if(row.excluded) excluded.add(r);
+    results.push(r);
+  }
+  $('results').style.display = 'block';
+  $('restored').hidden = false;
+  $('restoredMsg').textContent = `กู้คืนผลสแกนครั้งก่อนแล้ว ${rows.length} รูป ใส่รูปเพิ่มแล้วกดเริ่มได้เลย ระบบจะข้ามรูปที่ตรวจไปแล้ว`;
+  refresh(); rescore();
+}
+async function resetAll(){
+  if(running) return;
+  if(!confirm('ล้างผลสแกน เซลฟี่ และรายการรูปทั้งหมด แล้วเริ่มใหม่?')) return;
+  await store.clear();
+  results.forEach(r => r.thumb && URL.revokeObjectURL(r.thumb));
+  results = []; auto = []; confirmed.length = 0; negatives.length = 0; excluded.clear();
+  selfies = []; pool = []; sources = []; skipped = 0;
+  renderSelfies(); $('restored').hidden = true; $('results').style.display = 'none'; render(); refresh();
+  setStatus('AI พร้อมแล้ว' + (recR ? ' (โหมดแม่นยำสูง' + (GPU ? ' · ใช้การ์ดจอเร่งความเร็ว)' : ')') : ''));
 }
 
 /* ---------------- saving photos ---------------- */
 async function getBlob(r){
   if(r.item.file) return r.item.file;
-  if(!r.blob) r.blob = await r.item.get();
+  if(r.blob) return r.blob;
+  if(!r.item.get) throw new Error('need-source');
+  r.blob = await r.item.get();
   return r.blob;
 }
 function asFile(blob, name){ return blob instanceof File && blob.name === name ? blob : new File([blob], name, {type: blob.type || mime(name)}); }
@@ -755,7 +901,7 @@ async function saveOne(r, btn){
     const res = await saveFiles([asFile(blob, r.item.name)]);
     if(res === 'retry') toast('รูปพร้อมแล้ว', 'บันทึก', () => saveOne(r));
     else if(res === 'downloaded') toast('ดาวน์โหลดแล้ว');
-  }catch(e){ console.error(e); toast('โหลดรูปนี้ไม่สำเร็จ'); }
+  }catch(e){ console.error(e); toast(e.message === 'need-source' ? 'ใส่ไฟล์รูปชุดเดิมอีกครั้งเพื่อบันทึกรูปขนาดเต็ม' : 'โหลดรูปนี้ไม่สำเร็จ'); }
   if(btn) btn.classList.remove('busy');
 }
 const selectedList = () => results.filter(r => r.best >= thr() && !excluded.has(r));
@@ -776,12 +922,13 @@ function card(r, maybe){
   const im = document.createElement('img'); im.src = r.thumb; im.alt = r.item.name; im.loading = 'lazy'; im.width = r.w; im.height = r.h;
   wrap.appendChild(im); wrap.onclick = () => openLB(r); fig.appendChild(wrap);
   const t = thr();
-  if(maybe){ if(r.bestFace) ring(fig, r.bestFace, true, 0); }
+  const tf = maybe ? (r.maybeFace || r.bestFace) : r.bestFace;
+  if(maybe){ if(tf) ring(fig, tf, true, 0); }
   else r.faces.filter(f => f.score >= t).forEach((f, j) => ring(fig, f, false, j + r.item.name.length));
   if(!maybe){
     const pk = document.createElement('button'); pk.className = 'pick'; pk.setAttribute('aria-label', 'เลือกรูป ' + r.item.name); pk.setAttribute('aria-pressed', !excluded.has(r));
     pk.innerHTML = '<i><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></i>';
-    pk.onclick = e => { e.stopPropagation(); if(excluded.has(r)) excluded.delete(r); else excluded.add(r); fig.classList.toggle('sel', !excluded.has(r)); pk.setAttribute('aria-pressed', !excluded.has(r)); updateCount(); };
+    pk.onclick = e => { e.stopPropagation(); if(excluded.has(r)) excluded.delete(r); else excluded.add(r); fig.classList.toggle('sel', !excluded.has(r)); pk.setAttribute('aria-pressed', !excluded.has(r)); updateCount(); store.saveResult(r); };
     fig.appendChild(pk);
   }
   const dl = document.createElement('button'); dl.className = 'dl'; dl.innerHTML = DL_ICON;
@@ -792,9 +939,9 @@ function card(r, maybe){
   if(r.confirmed){ fb.innerHTML = '<span class="done">ยืนยันแล้วว่าเป็นคุณ</span>'; }
   else{
     const yes = document.createElement('button'); yes.textContent = 'ใช่ฉัน';
-    yes.onclick = () => { if(!r.bestFace) return; r.confirmed = true; confirmed.push({M:r.bestFace.M, R:r.bestFace.R}); excluded.delete(r); if(!running) rescore(); else { fig.replaceWith(card(r, false)); } };
+    yes.onclick = () => { if(!tf) return; r.confirmed = true; confirmed.push({M:tf.M, R:tf.R}); excluded.delete(r); store.saveMeta(); store.saveResult(r); if(!running) rescore(); else { fig.replaceWith(card(r, false)); } };
     const no = document.createElement('button'); no.textContent = 'ไม่ใช่';
-    no.onclick = () => { if(!r.bestFace) return; negatives.push({M:r.bestFace.M, R:r.bestFace.R}); (r.rejected ||= new Set()).add(r.bestFace); if(!running) rescore(); else { fig.remove(); updateCount(); } };
+    no.onclick = () => { if(!tf) return; negatives.push({M:tf.M, R:tf.R}); (r.rejected ||= new Set()).add(tf); store.saveMeta(); store.saveResult(r); if(!running) rescore(); else { fig.remove(); updateCount(); } };
     fb.append(yes, no);
   }
   fig.appendChild(fb);
@@ -808,7 +955,7 @@ function appendLive(r){
 function render(){
   const t = thr(), y = window.scrollY;
   const found = results.filter(r => r.best >= t).sort((a,b) => (b.confirmed - a.confirmed) || b.best - a.best);
-  const maybe = results.filter(r => r.best < t && r.best >= t - 0.08 && !r.confirmed).sort((a,b) => b.best - a.best);
+  const maybe = results.filter(isMaybe).sort((a,b) => b.best - a.best);
   $('grid').replaceChildren(...found.map(r => card(r, false)));
   $('maybeGrid').replaceChildren(...maybe.map(r => card(r, true)));
   updateCount(); window.scrollTo(0, y);
@@ -873,8 +1020,9 @@ $('shareBtn').onclick = async () => {
   }catch(e){ console.error(e); $('dlMsg').textContent = 'บันทึกไม่สำเร็จ ลองอีกครั้ง'; }
   $('shareBtn').disabled = false;
 };
-$('selAll').onclick = () => { excluded.clear(); shareReady = null; render(); };
-$('selNone').onclick = () => { results.forEach(r => excluded.add(r)); shareReady = null; render(); };
+$('selAll').onclick = () => { excluded.clear(); shareReady = null; render(); store.saveAll(); };
+$('selNone').onclick = () => { results.forEach(r => excluded.add(r)); shareReady = null; render(); store.saveAll(); };
+$('resetAll').onclick = resetAll;
 
 /* ---------------- wiring ---------------- */
 function tab(drive){
