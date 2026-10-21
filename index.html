@@ -126,6 +126,13 @@ dialog .cap{color:#e8ece9;font-size:14px;margin-top:8px;display:flex;justify-con
 dialog .cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw}
 dialog .cap .acts{display:flex;gap:8px}
 dialog .cap button{color:#e8ece9;border-color:#666}
+.lbwrap{position:relative;display:inline-block}
+#lbFaces button{position:absolute;min-height:0;padding:0;border-radius:6px;border:2px solid #F2D500;background:rgba(242,213,0,.12)}
+#lbFaces button:hover,#lbFaces button:focus-visible{background:rgba(242,213,0,.35)}
+.pickhint{color:#F2D500;font-size:15px;margin-top:6px}
+.others .ph{cursor:pointer}
+.calib{margin:28px 0 0;text-align:center}
+.linkish{border:0;background:none;color:var(--muted);text-decoration:underline;font-size:14px;min-height:0;padding:4px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -207,11 +214,19 @@ dialog .cap button{color:#e8ece9;border-color:#666}
       <button class="maybeToggle" id="maybeToggle" aria-expanded="false"><span>ดูรูปที่ก้ำกึ่ง <span id="maybeN"></span></span><small>รูปที่ AI ไม่แน่ใจ กด “ใช่ฉัน” เพื่อช่วยให้ระบบหารูปเพิ่มได้ ไม่ต้องดูก็ได้</small></button>
       <div class="grid" id="maybeGrid" hidden></div>
     </div>
+    <div id="othersWrap" hidden>
+      <button class="maybeToggle" id="othersToggle" aria-expanded="false"><span>AI ไม่เจอบางรูปที่มีคุณ? <span id="othersN"></span></span><small>เปิดดูรูปที่เหลือ เจอรูปที่มีคุณก็กดที่รูปแล้วแตะหน้าตัวเอง ระบบจะจำหน้านั้นและหารูปที่คล้ายกันเพิ่มให้</small></button>
+      <div id="othersBody" hidden>
+        <div class="grid others" id="othersGrid"></div>
+        <div class="btnrow"><button id="othersMore" hidden>ดูเพิ่ม</button></div>
+      </div>
+    </div>
+    <p class="calib"><button id="calibBtn" class="linkish">ดาวน์โหลดข้อมูลผลการทดสอบ (ไม่มีรูปหรือใบหน้า) เพื่อส่งให้คนพัฒนาปรับความแม่นยำ</button></p>
   </section>
 </main>
 
 <div class="toast" id="toast" role="status" hidden></div>
-<dialog id="lb"><img id="lbImg" alt=""><div class="cap"><span id="lbName"></span><div class="acts"><button id="lbSave">บันทึกรูปนี้</button><button id="lbClose">ปิด</button></div></div></dialog>
+<dialog id="lb"><div class="lbwrap"><img id="lbImg" alt=""><div id="lbFaces"></div></div><div class="pickhint" id="pickHint" hidden></div><div class="cap"><span id="lbName"></span><div class="acts"><button id="lbDeep" hidden>ไม่มีกรอบตรงหน้าฉัน</button><button id="lbSave">บันทึกรูปนี้</button><button id="lbClose">ปิด</button></div></div></dialog>
 
 <script>
 /* โหลดตัวรัน AI: เครื่องที่มีการ์ดจอรองรับ (WebGPU) ใช้รุ่นที่เร่งด้วยการ์ดจอ */
@@ -246,6 +261,16 @@ const confirmed = [], negatives = [];   // {M,R}
 let auto = [];
 const excluded = new Set();
 
+// พักให้หน้าเว็บอัปเดตโดยไม่ใช้ setTimeout (แท็บที่อยู่เบื้องหลังจะโดนหน่วง setTimeout จนช้ามาก)
+const yieldUI = (() => { const ch = new MessageChannel(), q = []; ch.port1.onmessage = () => q.shift()(); return () => new Promise(r => { q.push(r); ch.port2.postMessage(0); }); })();
+const BASE_TITLE = document.title;
+let wakeLock = null;
+async function keepAwake(on){
+  try{
+    if(on && 'wakeLock' in navigator && document.visibilityState === 'visible' && !wakeLock){ wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
+    if(!on && wakeLock){ await wakeLock.release(); wakeLock = null; }
+  }catch(e){ wakeLock = null; }
+}
 const setStatus = (t, err) => { $('status').textContent = t; $('status').className = 'status' + (err ? ' err' : ''); };
 const setBar = p => { $('bar').firstElementChild.style.width = (p*100) + '%'; };
 let toastT;
@@ -637,6 +662,8 @@ async function loadDrive(){
   try{
     const {files, heic} = await listDrive(id);
     const sid = addSource('drive', 'โฟลเดอร์ Google Drive (' + id_short(id) + ')', files.length);
+    const so = sources.find(s => s.id === sid); if(so) so.folderId = id;
+    store.saveMeta();
     files.forEach(f => pool.push(Object.assign(driveItem(f), {src: sid}))); skipped += heic;
     m.textContent = files.length ? `เพิ่ม ${files.length} รูปจาก Drive แล้ว` : 'ไม่พบรูปในโฟลเดอร์นี้';
   }catch(e){ m.className = 'msg err'; m.textContent = e.message; }
@@ -765,13 +792,15 @@ function crop112(px){
 }
 async function run(){
   running = true; stopFlag = false; refresh(); gen++;
+  keepAwake(true); store.saveMeta();
+  if(!MOBILE && 'Notification' in window && Notification.permission === 'default'){ try{ Notification.requestPermission(); }catch(e){} }
   const done = new Set(results.map(r => r.key));
   const todo = pool.filter(it => !done.has(it.key));
   // ผูกรูปที่สแกนไว้แล้ว (จากครั้งก่อน) กับไฟล์ที่เพิ่งใส่ จะได้บันทึกรูปขนาดเต็มได้
   const byKey = new Map(pool.map(it => [it.key, it]));
   results.forEach(r => { const it = byKey.get(r.key); if(it && !r.item.get) r.item = it; });
   $('results').style.display = 'block'; $('stopBtn').hidden = false; render();
-  if(!todo.length){ running = false; $('stopBtn').hidden = true; refresh(); setStatus(`รูปทั้งหมด ${pool.length} รูปตรวจไปแล้ว ผลอยู่ด้านล่าง`); rescore(); return; }
+  if(!todo.length){ running = false; $('stopBtn').hidden = true; refresh(); keepAwake(false); setStatus(`รูปทั้งหมด ${pool.length} รูปตรวจไปแล้ว ผลอยู่ด้านล่าง`); rescore(); return; }
   const t0 = performance.now(), AHEAD = 3, blobs = new Map(), decoded = new Map();
   const wantBlob = i => { if(i < todo.length && !blobs.has(i)) blobs.set(i, todo[i].get().catch(e => e)); return blobs.get(i); };
   // ถอดรหัสรูปถัดไปรอไว้ระหว่างที่ AI ทำงานกับรูปปัจจุบัน
@@ -823,10 +852,13 @@ async function run(){
     }catch(e){ console.warn('ข้าม', item.name, e); if(/API key|โควตา/.test(e.message || '')){ setStatus(e.message, true); stopFlag = true; } }
     const el = (performance.now()-t0)/1000, left = Math.round(el/(i+1)*(todo.length-i-1));
     setBar((i+1)/todo.length);
-    if(!stopFlag) setStatus(`ตรวจแล้ว ${skippedBefore + i + 1}/${pool.length} รูป` + (left > 3 ? ` · เหลือประมาณ ${left > 90 ? Math.round(left/60) + ' นาที' : left + ' วินาที'}` : ''));
-    await new Promise(r => setTimeout(r, 0));
+    if(!stopFlag) setStatus(`ตรวจแล้ว ${skippedBefore + i + 1}/${pool.length} รูป` + (left > 3 ? ` · เหลือประมาณ ${left > 90 ? Math.round(left/60) + ' นาที' : left + ' วินาที'}` : '') + (MOBILE ? ' · เปิดหน้านี้ค้างไว้จนเสร็จ' : ''));
+    document.title = `(${Math.round((i+1)/todo.length*100)}%) ${BASE_TITLE}`;
+    await yieldUI();
   }
-  running = false; $('stopBtn').hidden = true; refresh();
+  running = false; $('stopBtn').hidden = true; refresh(); keepAwake(false);
+  document.title = stopFlag ? BASE_TITLE : `✓ เสร็จแล้ว · ${BASE_TITLE}`;
+  if(!stopFlag && document.visibilityState === 'hidden' && 'Notification' in window && Notification.permission === 'granted'){ try{ new Notification('หาหน้าฉัน', {body: `ตรวจเสร็จแล้ว ${results.length} รูป`}); }catch(e){} }
   if(!/API key|โควตา/.test($('status').textContent)) setStatus(stopFlag ? `หยุดแล้ว ตรวจไป ${results.length} รูป (กดเริ่มอีกครั้งเพื่อตรวจต่อจากเดิม)` : `เสร็จแล้ว ตรวจทั้งหมด ${results.length} รูป`);
   rescore();
 }
@@ -852,7 +884,7 @@ const store = (() => {
     saveAll: () => tx('results', 'readwrite', s => { results.forEach(r => s.put(pack(r))); }),
     saveMeta: () => { clearTimeout(metaT); metaT = setTimeout(() => tx('meta', 'readwrite', s => s.put({
       selfies: selfies.filter(x => x.state === 'ok').map(x => ({url: x.url, M: x.M, R: x.R, yaw: x.yaw})),
-      confirmed, negatives }, 'session')), 300); },
+      confirmed, negatives, calib, total: pool.length, drive: sources.filter(s => s.kind === 'drive' && s.folderId).map(s => s.folderId) }, 'session')), 300); },
     load: async () => {
       const meta = await tx('meta', 'readonly', s => s.get('session'));
       const rows = await tx('results', 'readonly', s => s.getAll());
@@ -867,7 +899,7 @@ async function restoreSession(){
     meta.selfies.forEach(x => selfies.push({file: null, url: x.url, M: x.M, R: x.R, yaw: x.yaw, state: 'ok'}));
     renderSelfies();
   }
-  if(meta){ (meta.confirmed || []).forEach(c => confirmed.push(c)); (meta.negatives || []).forEach(n => negatives.push(n)); }
+  if(meta){ (meta.confirmed || []).forEach(c => confirmed.push(c)); (meta.negatives || []).forEach(n => negatives.push(n)); if(meta.calib) calib = meta.calib; }
   if(!rows.length){ refresh(); return; }
   for(const row of rows){
     const item = {name: row.name, key: row.key, driveId: row.driveId};
@@ -880,7 +912,22 @@ async function restoreSession(){
   }
   $('results').style.display = 'block';
   $('restored').hidden = false;
-  $('restoredMsg').textContent = `กู้คืนผลสแกนครั้งก่อนแล้ว ${rows.length} รูป ใส่รูปเพิ่มแล้วกดเริ่มได้เลย ระบบจะข้ามรูปที่ตรวจไปแล้ว`;
+  const total = meta && meta.total || 0, unfinished = total > rows.length;
+  $('restoredMsg').textContent = unfinished
+    ? `สแกนค้างไว้ ${rows.length}/${total} รูป (หน้าเว็บถูกปิดหรือรีเฟรชระหว่างสแกน) ` + (meta.drive && meta.drive.length && DRIVE_API_KEY ? 'ระบบดึงรายการจาก Drive ให้แล้ว กดเริ่มเพื่อทำต่อได้เลย' : 'ใส่ไฟล์ชุดเดิมอีกครั้งแล้วกดเริ่ม ระบบจะตรวจต่อจากที่ค้างไว้')
+    : `กู้คืนผลสแกนครั้งก่อนแล้ว ${rows.length} รูป ใส่รูปเพิ่มแล้วกดเริ่มได้เลย ระบบจะข้ามรูปที่ตรวจไปแล้ว`;
+  // ถ้าเคยใช้ลิงก์ Drive ดึงรายการรูปกลับมาให้เอง จะได้กดเริ่มสแกนต่อได้ทันที
+  if(unfinished && meta.drive && meta.drive.length && DRIVE_API_KEY && !pool.length){
+    for(const fid of meta.drive){
+      try{
+        const {files} = await listDrive(fid);
+        const sid = addSource('drive', 'โฟลเดอร์ Google Drive (' + id_short(fid) + ')', files.length);
+        const so = sources.find(s => s.id === sid); if(so) so.folderId = fid;
+        files.forEach(f => pool.push(Object.assign(driveItem(f), {src: sid})));
+      }catch(e){ console.warn('re-list drive', e); }
+    }
+    tab(true);
+  }
   refresh(); rescore();
 }
 async function resetAll(){
@@ -888,7 +935,7 @@ async function resetAll(){
   if(!confirm('ล้างผลสแกน เซลฟี่ และรายการรูปทั้งหมด แล้วเริ่มใหม่?')) return;
   await store.clear();
   results.forEach(r => r.thumb && URL.revokeObjectURL(r.thumb));
-  results = []; auto = []; confirmed.length = 0; negatives.length = 0; excluded.clear();
+  results = []; auto = []; confirmed.length = 0; negatives.length = 0; excluded.clear(); calib = {confirm: [], reject: [], detMiss: 0, deepFound: 0};
   selfies = []; pool = []; sources = []; skipped = 0; other = {};
   renderSelfies(); $('restored').hidden = true; $('results').style.display = 'none'; render(); refresh();
   setStatus('AI พร้อมแล้ว' + (recR ? ' (โหมดแม่นยำสูง' + (GPU ? ' · ใช้การ์ดจอเร่งความเร็ว)' : ')') : ''));
@@ -964,9 +1011,9 @@ function card(r, maybe){
   if(r.confirmed){ fb.innerHTML = '<span class="done">ยืนยันแล้วว่าเป็นคุณ</span>'; }
   else{
     const yes = document.createElement('button'); yes.textContent = 'ใช่ฉัน';
-    yes.onclick = () => { if(!tf) return; r.confirmed = true; confirmed.push({M:tf.M, R:tf.R}); excluded.delete(r); store.saveMeta(); store.saveResult(r); if(!running) rescore(); else { fig.replaceWith(card(r, false)); } };
+    yes.onclick = () => { if(!tf) return; calib.confirm.push(calibRow(tf, maybe ? 'maybe' : 'found')); r.confirmed = true; confirmed.push({M:tf.M, R:tf.R}); excluded.delete(r); store.saveMeta(); store.saveResult(r); if(!running) rescore(); else { fig.replaceWith(card(r, false)); } };
     const no = document.createElement('button'); no.textContent = 'ไม่ใช่';
-    no.onclick = () => { if(!tf) return; negatives.push({M:tf.M, R:tf.R}); (r.rejected ||= new Set()).add(tf); store.saveMeta(); store.saveResult(r); if(!running) rescore(); else { fig.remove(); updateCount(); } };
+    no.onclick = () => { if(!tf) return; calib.reject.push(calibRow(tf, maybe ? 'maybe' : 'found')); negatives.push({M:tf.M, R:tf.R}); (r.rejected ||= new Set()).add(tf); store.saveMeta(); store.saveResult(r); if(!running) rescore(); else { fig.remove(); updateCount(); } };
     fb.append(yes, no);
   }
   fig.appendChild(fb);
@@ -983,6 +1030,7 @@ function render(){
   const maybe = results.filter(isMaybe).sort((a,b) => (b.maybeFace ? b.maybeFace.score : -1) - (a.maybeFace ? a.maybeFace.score : -1)).slice(0, MAYBE_MAX);
   $('grid').replaceChildren(...found.map(r => card(r, false)));
   $('maybeGrid').replaceChildren(...maybe.map(r => card(r, true)));
+  renderOthers();
   updateCount(); window.scrollTo(0, y);
 }
 function updateCount(){
@@ -995,15 +1043,94 @@ function updateCount(){
   $('maybeGrid').hidden = $('maybeToggle').getAttribute('aria-expanded') !== 'true';
 }
 
+/* ---------------- รูปที่ AI ไม่เจอ: ให้ผู้ใช้แตะหน้าตัวเอง ---------------- */
+let calib = {confirm: [], reject: [], detMiss: 0, deepFound: 0};
+const OTHERS_PAGE = 40; let othersShown = OTHERS_PAGE;
+const calibRow = (f, how) => ({how, before: +((f.score ?? -1).toFixed(3)), yaw: +((f.yaw || 0).toFixed(2)), px: Math.round(f.px || 0), q: +((f.q ?? 1).toFixed(2)), hasR: !!f.R});
+function othersList(){
+  const t = thr(), inMaybe = new Set(results.filter(isMaybe).sort((a,b) => (b.maybeFace ? b.maybeFace.score : -1) - (a.maybeFace ? a.maybeFace.score : -1)).slice(0, MAYBE_MAX));
+  return results.filter(r => r.best < t && !inMaybe.has(r)).sort((a,b) => b.best - a.best);
+}
+function renderOthers(){
+  const list = othersList();
+  $('othersWrap').hidden = !list.length || running; $('othersN').textContent = list.length ? `(${list.length} รูป)` : '';
+  if($('othersToggle').getAttribute('aria-expanded') !== 'true'){ $('othersBody').hidden = true; return; }
+  $('othersBody').hidden = false;
+  $('othersGrid').replaceChildren(...list.slice(0, othersShown).map(r => {
+    const fig = document.createElement('figure'); fig.className = 'ph';
+    const wrap = document.createElement('div'); wrap.className = 'imgwrap';
+    const im = document.createElement('img'); im.src = r.thumb; im.alt = r.item.name; im.loading = 'lazy'; im.width = r.w; im.height = r.h;
+    wrap.appendChild(im); fig.appendChild(wrap); fig.onclick = () => openLB(r, true);
+    return fig;
+  }));
+  $('othersMore').hidden = list.length <= othersShown;
+}
+async function confirmFace(r, f, how){
+  if(recR && !f.R && f.crop) await upgradeFaces([f]);
+  calib.confirm.push(calibRow(f, how));
+  r.confirmed = true; confirmed.push({M: f.M, R: f.R}); excluded.delete(r);
+  store.saveMeta(); store.saveResult(r);
+  toast('จำหน้านี้แล้ว กำลังหารูปที่คล้ายกันเพิ่ม…');
+  await rescore();
+  const n = results.filter(x => x.best >= thr()).length;
+  toast(`ตอนนี้เจอรูปที่มีคุณ ${n} รูป`);
+}
+// สแกนรูปนี้ใหม่แบบละเอียดสุด (ความละเอียดสูง + ซูมทีละส่วน + รับหน้าที่ไม่ชัดมากขึ้น)
+async function deepRescan(r){
+  const blob = await getBlob(r);
+  const c = await blobToCanvas(blob, 2600), W = c.width, H = c.height;
+  let fs = await detectRegion(c, 0, 0, W, H, 960, 0.35);
+  const tw = Math.round(W*0.5), th = Math.round(H*0.5);
+  for(const [fx, fy] of [[0,0],[W-tw,0],[0,H-th],[W-tw,H-th],[(W-tw)>>1,(H-th)>>1]]) fs = fs.concat(await detectRegion(c, fx, fy, tw, th, 640, 0.35));
+  fs = nms(fs, 0.4).filter(f => (f.box[2]-f.box[0]) >= 12);
+  const pxs = fs.map(f => alignPixels(c, f.kps));
+  const Ms = await embed(recM, pxs, false), Rs = recR ? await embed(recR, pxs, false) : [];
+  // แปลงพิกัดให้เทียบกับรูปขนาดที่ใช้ตอนสแกนปกติ (ด้านยาว 1920)
+  const k = Math.min(1, 1920/Math.max(W, H)) / Math.min(1, 2600/Math.max(W, H)) || 1;
+  r.faces = fs.map((f, j) => ({ box: {x:f.box[0]/W, y:f.box[1]/H, w:(f.box[2]-f.box[0])/W, h:(f.box[3]-f.box[1])/H}, px: (f.box[2]-f.box[0])*k, q: f.score, yaw: yawOf(f.kps), M: Ms[j], R: recR ? Rs[j] : null, crop: null }));
+  r.rejected = null; r.deep = true;
+  scoreResult(r, posM(), posR()); store.saveResult(r);
+}
+function showFaceBoxes(r){
+  const L = $('lbFaces'); L.innerHTML = '';
+  r.faces.forEach((f, j) => {
+    const b = document.createElement('button'); b.setAttribute('aria-label', 'นี่คือหน้าฉัน (หน้าที่ ' + (j+1) + ')');
+    const pad = .15, x = f.box.x - f.box.w*pad, y = f.box.y - f.box.h*pad, w = f.box.w*(1+2*pad), h = f.box.h*(1+2*pad);
+    b.style.cssText = `left:${x*100}%;top:${y*100}%;width:${w*100}%;height:${h*100}%`;
+    b.onclick = async e => { e.stopPropagation(); $('lb').close(); await confirmFace(r, f, r.deep ? 'deep' : 'others'); };
+    L.appendChild(b);
+  });
+  $('pickHint').hidden = false;
+  $('pickHint').textContent = r.faces.length ? 'แตะกรอบสีเหลืองที่เป็นหน้าคุณ' : 'AI ยังไม่เห็นหน้าใครในรูปนี้ กด “ไม่มีกรอบตรงหน้าฉัน” เพื่อให้ตรวจละเอียดขึ้น';
+}
+
 /* ---------------- lightbox ---------------- */
 let lbUrl = null, lbR = null;
-async function openLB(r){
+async function openLB(r, pick){
   lbR = r; $('lbImg').src = r.thumb;
+  $('lbFaces').innerHTML = ''; $('pickHint').hidden = true; $('lbDeep').hidden = !pick || !!r.deep;
+  if(pick) showFaceBoxes(r);
   $('lbImg').alt = r.item.name; $('lbName').textContent = r.item.name; $('lb').showModal();
   try{ const blob = await getBlob(r); if(lbR !== r) return; lbUrl = URL.createObjectURL(blob); $('lbImg').src = lbUrl; }catch(e){}
 }
 $('lbClose').onclick = () => $('lb').close();
 $('lbSave').onclick = () => { if(lbR) saveOne(lbR); };
+$('lbDeep').onclick = async () => {
+  const r = lbR; if(!r) return;
+  const before = r.faces.length;
+  $('lbDeep').disabled = true; $('pickHint').hidden = false; $('pickHint').textContent = 'กำลังตรวจรูปนี้แบบละเอียด…';
+  try{
+    await deepRescan(r);
+    if(lbR !== r) return;
+    $('lbDeep').hidden = true;
+    if(r.faces.length > before) calib.deepFound++;
+    showFaceBoxes(r);
+    if(r.best >= thr()){ $('pickHint').textContent = 'ตรวจละเอียดแล้วเจอหน้าคุณ รูปนี้ถูกย้ายไปอยู่ในผลหลักแล้ว'; render(); }
+    else if(!r.faces.length){ calib.detMiss++; $('pickHint').textContent = 'ยังมองไม่เห็นหน้าในรูปนี้ อาจเล็ก หันข้าง หรือถูกบังมากเกินไป'; }
+    store.saveMeta();
+  }catch(e){ $('pickHint').textContent = e.message === 'need-source' ? 'ใส่ไฟล์รูปชุดเดิมอีกครั้งก่อน จึงจะตรวจละเอียดได้' : 'ตรวจไม่สำเร็จ'; }
+  $('lbDeep').disabled = false;
+};
 $('lb').addEventListener('click', e => { if(e.target === $('lb')) $('lb').close(); });
 $('lb').addEventListener('close', () => { $('lbImg').src = ''; lbR = null; if(lbUrl){ URL.revokeObjectURL(lbUrl); lbUrl = null; } });
 
@@ -1049,6 +1176,20 @@ $('shareBtn').onclick = async () => {
 $('selAll').onclick = () => { excluded.clear(); shareReady = null; render(); store.saveAll(); };
 $('selNone').onclick = () => { results.forEach(r => excluded.add(r)); shareReady = null; render(); store.saveAll(); };
 $('resetAll').onclick = resetAll;
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && running) keepAwake(true); });
+$('othersToggle').onclick = () => { const b = $('othersToggle'), open = b.getAttribute('aria-expanded') !== 'true'; b.setAttribute('aria-expanded', open); othersShown = OTHERS_PAGE; renderOthers(); };
+$('othersMore').onclick = () => { othersShown += OTHERS_PAGE; renderOthers(); };
+$('calibBtn').onclick = () => {
+  const t = thr(), found = results.filter(r => r.best >= t);
+  const data = { app: 'findmyface', when: new Date().toISOString(), threshold: t, cand: CAND, gpu: GPU, mobile: MOBILE,
+    scanned: results.length, found: found.length, maybe: results.filter(isMaybe).length,
+    selfies: selfies.filter(s => s.state === 'ok').map(s => +((s.yaw || 0).toFixed(2))),
+    foundScores: found.map(r => +r.best.toFixed(3)).sort((a,b) => a-b),
+    nearMiss: results.filter(r => r.best < t).map(r => +r.best.toFixed(3)).sort((a,b) => b-a).slice(0, 60),
+    confirms: calib.confirm, rejects: calib.reject, detMiss: calib.detMiss, deepFound: calib.deepFound,
+    facesPerPhoto: results.length ? +(results.reduce((s, r) => s + r.faces.length, 0) / results.length).toFixed(2) : 0 };
+  anchorSave(new Blob([JSON.stringify(data, null, 1)], {type: 'application/json'}), 'findmyface-test.json');
+};
 $('maybeToggle').onclick = () => { const b = $('maybeToggle'), open = b.getAttribute('aria-expanded') !== 'true'; b.setAttribute('aria-expanded', open); $('maybeGrid').hidden = !open; };
 
 /* ---------------- wiring ---------------- */
