@@ -109,6 +109,9 @@ input[type=range]{width:100%}
 .ph .fb button+button{border-left:1px solid var(--line)}
 .ph .fb button:hover{background:var(--soft)}
 .ph .fb .done{flex:1;text-align:center;font-size:14px;padding:8px 4px;color:var(--forest);font-weight:600}
+.maybeToggle{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;border-radius:12px;padding:12px 16px;margin:32px 0 12px;background:var(--card);font-size:17px;font-weight:600}
+.maybeToggle small{font-size:14px;font-weight:400;color:var(--muted)}
+.maybeToggle span span{font-weight:400;color:var(--muted)}
 .sec{margin:32px 0 10px;font-size:20px;font-weight:600}
 .sec small{display:block;font-size:15px;font-weight:400;color:var(--muted)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:20px 0 0}
@@ -201,8 +204,8 @@ dialog .cap button{color:#e8ece9;border-color:#666}
       <span class="status" id="dlMsg"></span>
     </div>
     <div id="maybeWrap" hidden>
-      <h2 class="sec">อาจจะใช่ <span id="maybeN"></span><small>กด “ใช่ฉัน” หรือ “ไม่ใช่” สักสองสามรูป ระบบจะเรียนรู้และจัดรูปที่เหลือให้แม่นขึ้นทันที</small></h2>
-      <div class="grid" id="maybeGrid"></div>
+      <button class="maybeToggle" id="maybeToggle" aria-expanded="false"><span>ดูรูปที่ก้ำกึ่ง <span id="maybeN"></span></span><small>รูปที่ AI ไม่แน่ใจ กด “ใช่ฉัน” เพื่อช่วยให้ระบบหารูปเพิ่มได้ ไม่ต้องดูก็ได้</small></button>
+      <div class="grid" id="maybeGrid" hidden></div>
     </div>
   </section>
 </main>
@@ -233,8 +236,11 @@ const MOBILE = matchMedia('(pointer:coarse)').matches;
 let det = null, recM = null, recR = null, GPU = false, ready = false, running = false, stopFlag = false;
 let selfies = [];        // {file,url,M,R,state}
 let pool = [];           // {name, get(), file?}
-let skipped = 0;
-let sources = [], srcSeq = 0;   // {id, kind, name, count}
+let skipped = 0, other = {};   // other: นามสกุลไฟล์ที่ไม่ใช่รูป -> จำนวน
+const VIDEO_RE = /\.(mp4|mov|m4v|avi|mkv|webm|3gp)$/i;
+function noteOther(name){ const m = name.match(/\.([a-z0-9]{1,5})$/i); const ext = m ? m[1].toLowerCase() : 'ไม่มีนามสกุล'; other[ext] = (other[ext] || 0) + 1; }
+let sources = [], srcSeq = 0;
+const zipParts = new Set();   // ชื่อชุด zip ที่ Google Drive แบ่งเป็นหลายไฟล์ (-001, -002, …)   // {id, kind, name, count}
 let results = [];        // {item,thumb,w,h,faces:[{box,M,R,crop,score}],best,bestFace,blob,confirmed,rejected}
 const confirmed = [], negatives = [];   // {M,R}
 let auto = [];
@@ -529,9 +535,11 @@ async function addLocal(files, folderName){
         const z = await JSZip.loadAsync(f), entries = [];
         for(const e of Object.values(z.files)){
           if(e.dir || /(^|\/)(__MACOSX|\.)/.test(e.name)) continue;
-          if(IMG_RE.test(e.name)) entries.push(e); else if(HEIC_RE.test(e.name)) skipped++;
+          if(IMG_RE.test(e.name)) entries.push(e); else if(HEIC_RE.test(e.name)) skipped++; else noteOther(e.name);
         }
         const id = addSource('zip', f.name, entries.length);
+        const part = f.name.match(/-(\d{3})\.zip$/i);
+        if(part) zipParts.add(f.name.replace(/-\d{3}\.zip$/i, ''));
         // อ่านรูปออกจาก zip ทีละรูปตอนสแกน ไม่โหลดทั้งหมดเข้าหน่วยความจำพร้อมกัน
         for(const e of entries){
           const name = e.name.split('/').pop();
@@ -541,6 +549,7 @@ async function addLocal(files, folderName){
       }catch(err){ setStatus('เปิดไฟล์ zip ไม่ได้: ' + f.name, true); }
     } else if(IMG_RE.test(f.name) || ((f.type||'').startsWith('image/') && !HEIC_RE.test(f.name))) loose.push(f);
     else if(HEIC_RE.test(f.name)) skipped++;
+    else noteOther(f.name);
   }
   if(loose.length){
     const dir = folderName || (loose[0].webkitRelativePath || '').split('/')[0];
@@ -603,6 +612,7 @@ async function listDrive(rootId){
         if(f.mimeType === 'application/vnd.google-apps.folder') folders.push(f.id);
         else if(HEIC_RE.test(f.name) || /heic|heif/.test(f.mimeType)) heic++;
         else if((f.mimeType || '').startsWith('image/')) files.push(f);
+        else if(f.mimeType !== 'application/vnd.google-apps.shortcut') noteOther(f.name);
       }
       $('driveMsg').textContent = `เจอแล้ว ${files.length} รูป…`;
     } while(token);
@@ -652,14 +662,17 @@ function faceScore(f, PM, PR){
   return p - (f.px && f.px < SMALL ? SMALL_PEN : 0);
 }
 // รูปที่ก้ำกึ่ง: หน้าข้างได้ช่องกว้างกว่า เพราะคะแนนหน้าข้างต่ำกว่าปกติแม้เป็นคนเดียวกัน
-const maybeBand = f => f && Math.abs(f.yaw || 0) >= SIDE ? 0.15 : 0.08;
-function isMaybe(r){ const t = thr(); return r.best < t && !r.confirmed && r.faces.some(f => f.score >= t - maybeBand(f)); }
+// รูปก้ำกึ่ง: เอาเฉพาะหน้าที่ภาพชัดพอ (ไม่เล็กเกิน ไม่หันจนเห็นแต่ด้านข้าง/ด้านหลัง และ AI มั่นใจว่าเป็นหน้าคนจริง)
+const MAYBE_MAX = 12;
+const maybeOK = f => (f.px == null || f.px >= 56) && Math.abs(f.yaw || 0) < 0.8 && (f.q == null || f.q >= 0.65);
+const maybeBand = f => f && Math.abs(f.yaw || 0) >= SIDE ? 0.10 : 0.06;
+function isMaybe(r){ const t = thr(); return r.best < t && !r.confirmed && r.faces.some(f => maybeOK(f) && f.score >= t - maybeBand(f)); }
 function scoreResult(r, PM, PR){
   let best = -1, bf = null;
   r.faces.forEach(f => { f.score = r.rejected && r.rejected.has(f) ? -1 : faceScore(f, PM, PR); if(f.score > best){ best = f.score; bf = f; } });
   r.best = best; r.bestFace = bf;
   // ในส่วนอาจจะใช่ ให้วงหน้าที่ใกล้เกณฑ์ที่สุดเมื่อคิดตามมุมหน้า
-  if(best < thr()){ let m = -9; r.faces.forEach(f => { const g = f.score - (thr() - maybeBand(f)); if(g > m){ m = g; r.maybeFace = f; } }); } else r.maybeFace = bf;
+  if(best < thr()){ let m = -9; r.maybeFace = null; r.faces.forEach(f => { if(!maybeOK(f)) return; const g = f.score - (thr() - maybeBand(f)); if(g > m){ m = g; r.maybeFace = f; } }); } else r.maybeFace = bf;
 }
 // ตรวจซ้ำด้วยโมเดลละเอียดเฉพาะหน้าที่โมเดลเร็วบอกว่าน่าจะใช่
 async function upgradeFaces(list){
@@ -729,7 +742,19 @@ function refresh(){
   if(results.length && pool.length){ const byKey = new Map(pool.map(it => [it.key, it])); results.forEach(r => { const it = byKey.get(r.key); if(it && !r.item.get) r.item = it; }); }
   const ok = selfies.some(s => s.state === 'ok');
   renderSources();
-  $('poolInfo').textContent = pool.length ? `รวม ${pool.length.toLocaleString()} รูป พร้อมค้นหา` + (skipped ? ` (ข้ามไฟล์ HEIC ${skipped} ไฟล์ ซึ่งเบราว์เซอร์อ่านไม่ได้)` : '') : '';
+  const notes = [];
+  if(skipped) notes.push(`ข้ามรูป HEIC ${skipped} ไฟล์ (เบราว์เซอร์อ่านไม่ได้)`);
+  for(const base of zipParts){
+    const have = sources.filter(s => s.kind === 'zip' && s.name.startsWith(base)).length;
+    if(have) notes.push(`Google Drive อาจแบ่งไฟล์ zip เป็นหลายไฟล์ (ใส่แล้ว ${have} ไฟล์) ถ้าในโฟลเดอร์ดาวน์โหลดมีไฟล์ชื่อเดียวกันที่ลงท้าย -002, -003 ให้ใส่เพิ่มด้วย`);
+  }
+  const oth = Object.entries(other);
+  if(oth.length){
+    const nv = oth.filter(([e]) => VIDEO_RE.test('.' + e)).reduce((s, [, n]) => s + n, 0), no = oth.reduce((s, [, n]) => s + n, 0) - nv;
+    if(nv) notes.push(`ข้ามวิดีโอ ${nv} ไฟล์`);
+    if(no) notes.push(`ข้ามไฟล์อื่นที่ไม่ใช่รูป ${no} ไฟล์ (${oth.filter(([e]) => !VIDEO_RE.test('.' + e)).map(([e, n]) => '.' + e + (n > 1 ? ' ×' + n : '')).join(', ')})`);
+  }
+  $('poolInfo').textContent = pool.length ? `รวม ${pool.length.toLocaleString()} รูป พร้อมค้นหา` + (notes.length ? ' · ' + notes.join(' · ') : '') : (notes.length ? notes.join(' · ') : '');
   $('clearPool').hidden = sources.length < 2 || running;
   $('goBtn').disabled = !(ready && ok && pool.length && !running);
 }
@@ -767,7 +792,7 @@ async function run(){
       for(let j=0;j<dets.length;j++){
         const f = dets[j];
         const yaw = yawOf(f.kps);
-        faces.push({ box: {x:f.box[0]/W, y:f.box[1]/H, w:(f.box[2]-f.box[0])/W, h:(f.box[3]-f.box[1])/H}, px: f.box[2]-f.box[0], yaw, M: Ms[j], R: null, crop: null });
+        faces.push({ box: {x:f.box[0]/W, y:f.box[1]/H, w:(f.box[2]-f.box[0])/W, h:(f.box[3]-f.box[1])/H}, px: f.box[2]-f.box[0], q: f.score, yaw, M: Ms[j], R: null, crop: null });
         // หน้าข้าง คะแนนจากตัวกรองชั้นแรกจะต่ำกว่าปกติ จึงส่งไปตรวจละเอียดง่ายกว่า
         if(recR && maxSim(Ms[j], PM) >= (Math.abs(yaw) >= SIDE ? CAND - 0.08 : CAND)) candIdx.push(j);
       }
@@ -820,7 +845,7 @@ const store = (() => {
   const pack = r => ({ key: r.key, name: r.item.name, driveId: r.item.driveId || null, w: r.w, h: r.h, thumbBlob: r.thumbBlob,
     full: r.blob || (r.best >= thr() - 0.18 && r.item.file) || null, confirmed: !!r.confirmed, excluded: excluded.has(r),
     rejected: r.rejected ? [...r.rejected].map(f => r.faces.indexOf(f)) : [],
-    faces: r.faces.map(f => ({box: f.box, px: f.px, yaw: f.yaw, M: f.M, R: f.R, crop: f.crop})) });
+    faces: r.faces.map(f => ({box: f.box, px: f.px, q: f.q, yaw: f.yaw, M: f.M, R: f.R, crop: f.crop})) });
   let metaT;
   return {
     saveResult: r => tx('results', 'readwrite', s => s.put(pack(r))),
@@ -864,7 +889,7 @@ async function resetAll(){
   await store.clear();
   results.forEach(r => r.thumb && URL.revokeObjectURL(r.thumb));
   results = []; auto = []; confirmed.length = 0; negatives.length = 0; excluded.clear();
-  selfies = []; pool = []; sources = []; skipped = 0;
+  selfies = []; pool = []; sources = []; skipped = 0; other = {};
   renderSelfies(); $('restored').hidden = true; $('results').style.display = 'none'; render(); refresh();
   setStatus('AI พร้อมแล้ว' + (recR ? ' (โหมดแม่นยำสูง' + (GPU ? ' · ใช้การ์ดจอเร่งความเร็ว)' : ')') : ''));
 }
@@ -955,7 +980,7 @@ function appendLive(r){
 function render(){
   const t = thr(), y = window.scrollY;
   const found = results.filter(r => r.best >= t).sort((a,b) => (b.confirmed - a.confirmed) || b.best - a.best);
-  const maybe = results.filter(isMaybe).sort((a,b) => b.best - a.best);
+  const maybe = results.filter(isMaybe).sort((a,b) => (b.maybeFace ? b.maybeFace.score : -1) - (a.maybeFace ? a.maybeFace.score : -1)).slice(0, MAYBE_MAX);
   $('grid').replaceChildren(...found.map(r => card(r, false)));
   $('maybeGrid').replaceChildren(...maybe.map(r => card(r, true)));
   updateCount(); window.scrollTo(0, y);
@@ -967,6 +992,7 @@ function updateCount(){
   $('foundSub').textContent = n ? `ที่มีคุณ · เลือกไว้ ${sel} รูป` : 'ที่มีคุณ';
   $('empty').hidden = !!n || running; $('actions').hidden = !n;
   $('maybeWrap').hidden = !m; $('maybeN').textContent = m ? `(${m})` : '';
+  $('maybeGrid').hidden = $('maybeToggle').getAttribute('aria-expanded') !== 'true';
 }
 
 /* ---------------- lightbox ---------------- */
@@ -1023,6 +1049,7 @@ $('shareBtn').onclick = async () => {
 $('selAll').onclick = () => { excluded.clear(); shareReady = null; render(); store.saveAll(); };
 $('selNone').onclick = () => { results.forEach(r => excluded.add(r)); shareReady = null; render(); store.saveAll(); };
 $('resetAll').onclick = resetAll;
+$('maybeToggle').onclick = () => { const b = $('maybeToggle'), open = b.getAttribute('aria-expanded') !== 'true'; b.setAttribute('aria-expanded', open); $('maybeGrid').hidden = !open; };
 
 /* ---------------- wiring ---------------- */
 function tab(drive){
@@ -1042,7 +1069,7 @@ $('pickFiles').onclick = () => $('poolInput').click();
 $('pickFolder').onclick = () => $('folderInput').click();
 $('poolInput').onchange = e => { addLocal([...e.target.files]); e.target.value = ''; };
 $('folderInput').onchange = e => { addLocal([...e.target.files]); e.target.value = ''; };
-$('clearPool').onclick = () => { pool = []; sources = []; skipped = 0; $('driveMsg').textContent = ''; refresh(); };
+$('clearPool').onclick = () => { pool = []; sources = []; skipped = 0; other = {}; $('driveMsg').textContent = ''; refresh(); };
 $('goBtn').onclick = run;
 $('stopBtn').onclick = () => { stopFlag = true; };
 
